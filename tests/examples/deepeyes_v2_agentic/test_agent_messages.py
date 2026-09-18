@@ -91,3 +91,28 @@ def test_build_executor_resolves_relative_image_against_yaml_dir(tmp_path, monke
 
     assert captured["name"] == "apptainer_jupyter"
     assert captured["config"]["image"] == str(tmp_path / "local.sif")
+
+
+def test_agent_config_path_can_be_overridden(tmp_path, monkeypatch):
+    config_file = tmp_path / "agent config.yaml"
+    config_file.write_text("max_turns: 3\nmarker: local-model\n", encoding="utf-8")
+    monkeypatch.setenv("DEEPEYES_V2_AGENT_CONFIG", str(config_file))
+    assert agent_module.load_agent_config()["marker"] == "local-model"
+
+
+def test_api_error_code_handles_empty_non_json_response():
+    class _Response:
+        @staticmethod
+        def json():
+            raise ValueError("empty response body")
+
+    assert agent_module._api_error_code(_Response()) is None
+
+
+def test_api_error_code_extracts_known_code():
+    class _Response:
+        @staticmethod
+        def json():
+            return {"error": {"code": "context_length_exceeded"}}
+
+    assert agent_module._api_error_code(_Response()) == "context_length_exceeded"
