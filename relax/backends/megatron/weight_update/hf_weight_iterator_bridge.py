@@ -1,6 +1,7 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
 import dataclasses
+import inspect
 import re
 import time
 from collections import OrderedDict
@@ -38,6 +39,27 @@ _NON_BLOCKING = device_utils.use_non_blocking_copy()
 
 # Weight names that must appear in the same chunk for SGLang's MLA fusion.
 _MLA_PAIRED_SUFFIXES = ("q_a_proj.weight", "kv_a_proj_with_mqa.weight")
+
+
+def _merge_lora_weights(base_weight, linear_out, linear_in, alpha, dim, *, tp_size, tp_group):
+    """Merge LoRA weights across Megatron-Bridge API generations.
+
+    Bridge 0.6 derives tensor-parallel size from ``tp_group`` and removed the
+    explicit ``tp_size`` keyword. Older Bridge releases require both. Inspect
+    the installed contract once per call rather than catching ``TypeError``,
+    which could hide a real shape or collective error raised inside ``merge``.
+    """
+    merger = LoRAMerge()
+    kwargs = {"tp_group": tp_group}
+    try:
+        accepts_tp_size = "tp_size" in inspect.signature(merger.merge).parameters
+    except (TypeError, ValueError):
+        # Some downstream extension wrappers do not expose a Python signature;
+        # those predate the 0.6 API change and use the legacy contract.
+        accepts_tp_size = True
+    if accepts_tp_size:
+        kwargs["tp_size"] = tp_size
+    return merger.merge(base_weight, linear_out, linear_in, alpha, dim, **kwargs)
 
 
 class HfWeightIteratorBridge(HfWeightIteratorBase):
@@ -196,19 +218,15 @@ class HfWeightIteratorBridge(HfWeightIteratorBase):
         linear_in = linear_in.to(device=device).float()
         linear_out = linear_out.to(device=device).float()
 
-        merged = (
-            LoRAMerge()
-            .merge(
-                param.data.float(),
-                linear_out,
-                linear_in,
-                self.lora_alpha,
-                self.lora_dim,
-                tp_size=tp_size,
-                tp_group=tp_group,
-            )
-            .to(param.dtype)
-        )
+        merged = _merge_lora_weights(
+            param.data.float(),
+            linear_out,
+            linear_in,
+            self.lora_alpha,
+            self.lora_dim,
+            tp_size=tp_size,
+            tp_group=tp_group,
+        ).to(param.dtype)
 
         merged_param = torch.nn.Parameter(merged, requires_grad=False)
         for key, value in info.attrs.items():

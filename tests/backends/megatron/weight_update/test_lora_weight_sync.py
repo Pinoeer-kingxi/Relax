@@ -345,7 +345,7 @@ class TestTargetModuleExpansion:
 
 
 class TestMergeContract:
-    """The merge-mode fold relies on LoRAMerge(tp_size=1) == base + alpha/dim*(B @ A)."""
+    """The merge-mode fold must match base + alpha/dim*(B @ A)."""
 
     def test_tp1_formula_reference(self):
         # Documents the exact math _merge_full_base depends on (no megatron needed).
@@ -359,22 +359,25 @@ class TestMergeContract:
         assert expected.shape == base.shape
 
     def test_tp1_matches_real_loramerge(self):
-        from inspect import signature
+        import importlib
+        import sys
 
-        lora = pytest.importorskip("megatron.bridge.peft.lora")
-        if not hasattr(lora, "LoRAMerge"):
-            pytest.skip("this Megatron-Bridge build does not expose LoRAMerge")
-        LoRAMerge = lora.LoRAMerge
-
-        if "tp_size" not in signature(LoRAMerge().merge).parameters:
-            pytest.skip("installed megatron bridge LoRAMerge.merge lacks tp_size support")
+        pytest.importorskip("megatron.bridge.peft")
+        module_name = "relax.backends.megatron.weight_update.hf_weight_iterator_bridge"
+        bridge_module = (
+            importlib.reload(sys.modules[module_name])
+            if module_name in sys.modules
+            else importlib.import_module(module_name)
+        )
 
         torch.manual_seed(0)
         base = torch.randn(6, 5)
         b = torch.randn(6, 2)
         a = torch.randn(2, 5)
         alpha, r = 8, 2
-        merged = LoRAMerge().merge(base.float(), b.float(), a.float(), alpha, r, tp_size=1, tp_group=None)
+        merged = bridge_module._merge_lora_weights(
+            base.float(), b.float(), a.float(), alpha, r, tp_size=1, tp_group=None
+        )
         expected = base + (alpha / r) * (b @ a)
         assert torch.allclose(merged, expected, atol=1e-5)
 
