@@ -11,6 +11,16 @@ cd "${SCRIPT_DIR}"
 export OPENAI_BASE_URL="${RELAX_BASE_URL%/}"
 export OPENAI_API_KEY="${RELAX_SESSION_ID}"
 
+# httpx does not consistently honor CIDR entries such as 10.0.0.0/8 in
+# NO_PROXY.  Ray advertises the agentic API by its concrete node IP, so add
+# that host explicitly or requests may be sent through an ambient HTTP proxy
+# and fail with an empty 502 response.  Preserve proxy access for genuinely
+# external search APIs.
+RELAX_API_AUTHORITY="${OPENAI_BASE_URL#*://}"
+RELAX_API_HOST="${RELAX_API_AUTHORITY%%[:/]*}"
+export NO_PROXY="${NO_PROXY:+${NO_PROXY},}${RELAX_API_HOST}"
+export no_proxy="${no_proxy:+${no_proxy},}${RELAX_API_HOST}"
+
 # Persist each session's stdout and stderr without spawning helper processes.
 # Functional agent output is written separately through RELAX_OUTPUT_JSON.
 if [ -n "${AGENT_DEBUG_LOG_DIR:-}" ]; then

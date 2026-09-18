@@ -816,6 +816,22 @@ def _admission_coordinator(*, max_wait_s: float = 30.0, capacity: int = 100):
     return coordinator_cls, coordinator
 
 
+def test_admission_coordinator_metrics_client_ignores_proxy_environment() -> None:
+    coordinator_cls = AdmissionCoordinator.__ray_metadata__.modified_class
+    args = Namespace(
+        sglang_router_ip="127.0.0.1",
+        sglang_router_port=30000,
+        agentic_admission_max_wait_s=30.0,
+        agentic_admission_headroom=0.9,
+        agentic_admission_pressure_threshold=0.92,
+    )
+
+    with patch("relax.agentic.session.admission_coordinator.httpx.AsyncClient") as client_cls:
+        coordinator_cls(args)
+
+    assert client_cls.call_args.kwargs["trust_env"] is False
+
+
 async def test_admission_coordinator_bypasses_protected_and_degraded_requests() -> None:
     coordinator_cls, coordinator = _admission_coordinator()
     protected = await coordinator_cls.acquire(
