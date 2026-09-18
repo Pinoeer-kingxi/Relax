@@ -66,7 +66,6 @@ def _load_megatron_dependencies() -> SimpleNamespace:
         from relax.backends.megatron.weight_update.hf_weight_iterator_bridge import (
             _adapter_base_prefix,
             _base_param_prefix,
-            _merge_lora_weights,
         )
         from relax.backends.megatron.weight_update.lora_adapter_sync import LoraAdapterSync
         from relax.distributed.checkpoint_service.utils import load_weight
@@ -85,7 +84,6 @@ def _load_megatron_dependencies() -> SimpleNamespace:
         named_params_and_buffers=named_params_and_buffers,
         adapter_base_prefix=_adapter_base_prefix,
         base_param_prefix=_base_param_prefix,
-        merge_lora_weights=_merge_lora_weights,
         LoraAdapterSync=LoraAdapterSync,
         load_weight=load_weight,
     )
@@ -1189,6 +1187,12 @@ class DeviceDirectBackend(CommBackend):
         if not slot or "in" not in slot or "out" not in slot:
             return param
 
+        try:
+            # Megatron-Bridge >= 0.6.0 moved LoRAMerge into its own module.
+            from megatron.bridge.peft.lora_merge import LoRAMerge
+        except ImportError:  # bridge <= 0.5.x
+            from megatron.bridge.peft.lora import LoRAMerge
+
         linear_in = slot["in"].float()
         linear_out = slot["out"].float()
         if ".experts." in name and linear_in.ndim > 2:
@@ -1199,15 +1203,19 @@ class DeviceDirectBackend(CommBackend):
             linear_in = linear_in[local_idx]
             linear_out = linear_out[local_idx]
 
-        return self._megatron.merge_lora_weights(
-            param.float(),
-            linear_out,
-            linear_in,
-            self.args.lora_alpha,
-            self.args.lora_rank,
-            tp_size=1,
-            tp_group=None,
-        ).to(param.dtype)
+        return (
+            LoRAMerge()
+            .merge(
+                param.float(),
+                linear_out,
+                linear_in,
+                self.args.lora_alpha,
+                self.args.lora_rank,
+                tp_size=1,
+                tp_group=None,
+            )
+            .to(param.dtype)
+        )
 
     def _push_lora_adapter_distributed(self, *, first_sync: bool) -> None:
         """Export the HF adapter and broadcast it to every rollout SGLang

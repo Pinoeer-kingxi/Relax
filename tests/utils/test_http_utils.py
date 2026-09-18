@@ -7,8 +7,7 @@ import asyncio
 import httpx
 import pytest
 
-from relax.utils import http_utils
-from relax.utils.http_utils import _post, init_http_client, router_worker_base_url, router_worker_base_urls
+from relax.utils.http_utils import _post, router_worker_base_url, router_worker_base_urls
 
 
 class _StubClient:
@@ -56,31 +55,6 @@ def test_post_retries_retryable_503_then_succeeds():
 
     assert result == {"ok": True}
     assert client.calls == 2
-
-
-def test_internal_http_client_does_not_inherit_ambient_proxy(monkeypatch):
-    captured: dict = {}
-
-    class _Client:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-    args = type(
-        "Args",
-        (),
-        {
-            "rollout_num_gpus": 2,
-            "rollout_num_gpus_per_engine": 1,
-            "sglang_server_concurrency": 4,
-            "use_distributed_post": False,
-        },
-    )()
-    monkeypatch.setattr(http_utils, "_http_client", None)
-    monkeypatch.setattr(http_utils.httpx, "AsyncClient", _Client)
-
-    init_http_client(args)
-
-    assert captured["trust_env"] is False
 
 
 @pytest.mark.parametrize(

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import hashlib
 import html
 import json
 import re
@@ -213,8 +212,6 @@ class DeepEyesV2Env:
         self.web_search_attempt_count = 0
         self.web_search_result_count = 0
         self.web_search_elapsed_time_s = 0.0
-        self.web_search_observation_fingerprints: list[str] = []
-        self.web_search_runtime_metrics: dict[str, int] = {}
         try:
             self._web_search_config = resolve_search_config(web_search_config)
             self._web_search_session = SearchSession(self._web_search_config)
@@ -326,7 +323,6 @@ class DeepEyesV2Env:
         search_session = self._web_search_session
         self._web_search_session = None
         if search_session is not None:
-            self.web_search_runtime_metrics = search_session.snapshot_metrics()
             search_session.close()
         ctx = self._session_ctx
         if ctx is None:
@@ -491,8 +487,6 @@ class DeepEyesV2Env:
             }
         self.web_search_attempt_count += 1
         result = search(query, config=self._web_search_config, session=self._web_search_session)
-        if self._web_search_session is not None:
-            self.web_search_runtime_metrics = self._web_search_session.snapshot_metrics()
         if result == "Error":
             return {"status": "error", "result": "Error", "images": []}
         self.web_search_result_count += len(result.get("data", []))
@@ -509,8 +503,6 @@ class DeepEyesV2Env:
                 "result": f"{exc} No results found for '{query}'. Try with a more general query.",
                 "images": [],
             }
-        fingerprint = hashlib.sha256(content.encode()).hexdigest()[:16]
-        self.web_search_observation_fingerprints.append(fingerprint)
         return {"status": "success", "result": content, "images": []}
 
 

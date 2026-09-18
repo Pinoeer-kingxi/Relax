@@ -97,7 +97,7 @@ class AdmissionCoordinator:
         self._waiter_order: deque[str] = deque()
         self._cancelled_tickets: dict[str, float] = {}
         self._counters: dict[str, float] = {}
-        self._client = httpx.AsyncClient(timeout=httpx.Timeout(_METRICS_TIMEOUT_S), trust_env=False)
+        self._client = httpx.AsyncClient(timeout=httpx.Timeout(_METRICS_TIMEOUT_S))
         self._poll_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:

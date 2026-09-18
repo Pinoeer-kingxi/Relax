@@ -32,29 +32,6 @@ from PIL import Image
 CONFIG_PATH = Path(__file__).with_name("deepeyes_v2_config.yaml")
 
 
-def _api_error_code(response: Any) -> str | None:
-    """Return an OpenAI error code without masking a malformed error body."""
-    try:
-        payload = response.json()
-    except (AttributeError, ValueError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    error = payload.get("error")
-    if not isinstance(error, dict):
-        return None
-    code = error.get("code")
-    return code if isinstance(code, str) else None
-
-
-def load_agent_config() -> dict[str, Any]:
-    config_path = Path(os.environ.get("DEEPEYES_V2_AGENT_CONFIG", CONFIG_PATH)).expanduser()
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict):
-        raise ValueError("DeepEyes V2 agent config root must be a mapping")
-    return config
-
-
 def read_session_input(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -167,11 +144,8 @@ async def run_session(messages: list[dict[str, Any]], metadata: dict[str, Any]) 
         AsyncOpenAI,
     )
 
-    config = load_agent_config()
+    config = yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
     max_turns = int(config["max_turns"])
-    max_completion_tokens = int(config.get("max_completion_tokens", 4096))
-    if max_completion_tokens < 1:
-        raise ValueError("max_completion_tokens must be positive")
     ensure_sandbox_timeout_s = int(config["ensure_sandbox_timeout_s"])
 
     data_index = str(metadata.get("data_index") or metadata.get("index") or "?")
@@ -211,11 +185,11 @@ async def run_session(messages: list[dict[str, Any]], metadata: dict[str, Any]) 
                 response = await client.chat.completions.create(
                     model=os.environ.get("OPENAI_MODEL", "model"),
                     messages=messages,
-                    max_tokens=max_completion_tokens,
                     extra_body=extra_body,
                 )
             except APIStatusError as exc:
-                code = _api_error_code(exc.response)
+                err = (exc.response.json() or {}).get("error", {})
+                code = err.get("code") if isinstance(err, dict) else None
                 if code == "context_length_exceeded":
                     stop_reason = "finish_length"
                     break
@@ -272,8 +246,6 @@ async def run_session(messages: list[dict[str, Any]], metadata: dict[str, Any]) 
             "web_search_attempt_count": env.web_search_attempt_count,
             "web_search_result_count": env.web_search_result_count,
             "web_search_elapsed_time_s": round(env.web_search_elapsed_time_s, 6),
-            "web_search_observation_fingerprints": env.web_search_observation_fingerprints,
-            "web_search_runtime_metrics": env.web_search_runtime_metrics,
         },
     }
 

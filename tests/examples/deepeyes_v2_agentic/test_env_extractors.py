@@ -40,18 +40,6 @@ def test_extract_tool_call_search():
     assert parsed == {"name": "search", "arguments": {"query": "x"}}
 
 
-def test_extract_tool_call_accepts_gpu_stop_token_omitting_closing_tag():
-    text = '<think>search first</think>\n<tool_call>{"name":"search","arguments":{"query":"x"}}'
-
-    assert extract_tool_call(text) == {"name": "search", "arguments": {"query": "x"}}
-
-
-def test_extract_tool_call_rejects_trailing_text_when_closing_tag_is_omitted():
-    text = '<tool_call>{"name":"search","arguments":{"query":"x"}} trailing'
-
-    assert extract_tool_call(text) is None
-
-
 def test_extract_tool_call_image_search_no_args():
     parsed = extract_tool_call('<tool_call>{"name": "image_search"}</tool_call>')
     assert parsed == {"name": "image_search", "arguments": None}

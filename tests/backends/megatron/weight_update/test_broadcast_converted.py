@@ -57,7 +57,6 @@ try:
         _compute_slot_size,
         _decode_metadata,
         _encode_metadata,
-        _merge_lora_weights,
     )
 finally:
     for _mod, _orig in _saved.items():
@@ -94,36 +93,6 @@ def _make_converted(name: str, value: float = 1.0):
 class FakeHandle:
     def wait(self):
         pass
-
-
-class TestLoRAMergeCompatibility:
-    def test_modern_bridge_derives_tp_size_from_group(self):
-        class ModernMerge:
-            def merge(self, base, linear_out, linear_in, alpha, dim, *, tp_group, scale=None):
-                assert tp_group == "tp-group"
-                assert scale is None
-                return base + (alpha / dim) * (linear_out @ linear_in)
-
-        base = torch.zeros(3, 4)
-        linear_out = torch.ones(3, 2)
-        linear_in = torch.ones(2, 4)
-        with patch("relax.backends.megatron.weight_update.hf_weight_iterator_bridge.LoRAMerge", ModernMerge):
-            merged = _merge_lora_weights(base, linear_out, linear_in, 4, 2, tp_size=2, tp_group="tp-group")
-        assert torch.equal(merged, torch.full((3, 4), 4.0))
-
-    def test_legacy_bridge_receives_explicit_tp_size(self):
-        class LegacyMerge:
-            def merge(self, base, linear_out, linear_in, alpha, dim, *, tp_size, tp_group):
-                assert tp_size == 2
-                assert tp_group == "tp-group"
-                return base + (alpha / dim) * (linear_out @ linear_in)
-
-        base = torch.zeros(3, 4)
-        linear_out = torch.ones(3, 2)
-        linear_in = torch.ones(2, 4)
-        with patch("relax.backends.megatron.weight_update.hf_weight_iterator_bridge.LoRAMerge", LegacyMerge):
-            merged = _merge_lora_weights(base, linear_out, linear_in, 4, 2, tp_size=2, tp_group="tp-group")
-        assert torch.equal(merged, torch.full((3, 4), 4.0))
 
 
 def _make_phase_mocks(all_converted_per_rank, bucket_infos, group_ranks):

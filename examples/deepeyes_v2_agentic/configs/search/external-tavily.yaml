@@ -2,16 +2,9 @@ backend: external
 top_k: 5
 timeout_s: 10
 max_retries: 2
-retry_budget_s: 30
-backoff_initial_s: 0.5
-backoff_max_s: 4
+backoff_s: 0.5
 trust_env: false
-max_response_bytes: 1048576
 max_observation_chars: 12000
-cache_ttl_s: 60
-cache_max_entries: 128
-circuit_breaker_failures: 5
-circuit_breaker_reset_s: 30
 external:
   endpoint: https://api.tavily.com/search
   method: POST

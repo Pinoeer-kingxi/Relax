@@ -2,13 +2,6 @@ backend: mock
 top_k: 5
 timeout_s: 5
 max_retries: 2
-retry_budget_s: 20
-backoff_initial_s: 0.25
-backoff_max_s: 2
+backoff_s: 0.25
 trust_env: false
-max_response_bytes: 1048576
 max_observation_chars: 12000
-cache_ttl_s: 0
-cache_max_entries: 128
-circuit_breaker_failures: 5
-circuit_breaker_reset_s: 30

@@ -287,9 +287,7 @@ def _judge_chat(messages: list[dict], temperature: float = 0.3, max_tokens: int 
 
 
 _ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
-_TOOL_CALL_OPEN = "<tool_call>"
-_TOOL_CALL_CLOSE = "</tool_call>"
-_TOOL_CALL_TRAJECTORY_BOUNDARIES = (_TOOL_CALL_CLOSE, "<think>", "<answer>", _TOOL_CALL_OPEN)
+_TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
 _SEARCH_TOOL_NAMES = frozenset({"search", "image_search"})
 _VALID_TOOL_NAMES = frozenset({"python_exec", "search", "image_search"})
 
@@ -297,38 +295,6 @@ _VALID_TOOL_NAMES = frozenset({"python_exec", "search", "image_search"})
 def extract_answer(text: str) -> str | None:
     m = _ANSWER_RE.search(text)
     return m.group(1).strip() if m else None
-
-
-def _tool_call_payloads(predict_str: str) -> list[dict]:
-    """Parse complete JSON objects following every ``<tool_call>`` opener.
-
-    SGLang excludes matched stop tokens from generated text. Since the recipe
-    stops on the single-token ``</tool_call>`` marker, valid agent trajectories
-    can contain a complete JSON object without the closing tag. ``raw_decode``
-    accepts that exact shape while still rejecting truncated JSON.
-    """
-    decoder = json.JSONDecoder()
-    payloads: list[dict] = []
-    cursor = 0
-    while True:
-        start = predict_str.find(_TOOL_CALL_OPEN, cursor)
-        if start < 0:
-            return payloads
-        body_start = start + len(_TOOL_CALL_OPEN)
-        body = predict_str[body_start:].lstrip()
-        leading_whitespace = len(predict_str[body_start:]) - len(body)
-        try:
-            payload, consumed = decoder.raw_decode(body)
-        except (json.JSONDecodeError, ValueError):
-            cursor = body_start
-            continue
-        remainder = body[consumed:].lstrip()
-        if remainder and not remainder.startswith(_TOOL_CALL_TRAJECTORY_BOUNDARIES):
-            cursor = body_start
-            continue
-        if isinstance(payload, dict):
-            payloads.append(payload)
-        cursor = body_start + leading_whitespace + consumed
 
 
 def _has_valid_tool_call(predict_str: str) -> bool:
@@ -341,7 +307,11 @@ def _has_valid_tool_call(predict_str: str) -> bool:
     Malformed JSON or unknown names don't trigger the bonus because they never
     actually run a tool — the model just emitted the tag.
     """
-    for payload in _tool_call_payloads(predict_str):
+    for m in _TOOL_CALL_RE.finditer(predict_str):
+        try:
+            payload = json.loads(m.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
         if isinstance(payload, dict) and payload.get("name") in _VALID_TOOL_NAMES:
             return True
     return False
@@ -356,7 +326,11 @@ def _count_search_tool_calls(predict_str: str) -> int:
     Malformed JSON / missing name are ignored (they're caught by other checks).
     """
     n = 0
-    for payload in _tool_call_payloads(predict_str):
+    for m in _TOOL_CALL_RE.finditer(predict_str):
+        try:
+            payload = json.loads(m.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            continue
         if isinstance(payload, dict) and payload.get("name") in _SEARCH_TOOL_NAMES:
             n += 1
     return n
@@ -632,10 +606,9 @@ def compute_score_search(predict_str: str, ground_truth: str, extra_info: dict |
     # Compares raw counts (any name, including python_exec) — this is a syntax
     # check, not a semantic one. Perception / reason scorers skip it because
     # stray tool_call tags shouldn't penalise non-search splits.
-    raw_open = predict_str.count(_TOOL_CALL_OPEN)
-    raw_close = predict_str.count(_TOOL_CALL_CLOSE)
-    parsed_tool_calls = len(_tool_call_payloads(predict_str))
-    if raw_close > raw_open or parsed_tool_calls != raw_open:
+    raw_open = predict_str.count("<tool_call>")
+    raw_close = predict_str.count("</tool_call>")
+    if raw_open != raw_close:
         is_format_error = True
         reasons.append("tool_call_tag_mismatch")
     search_penalty = 0.1 if search_call_count > 0 else 0.0

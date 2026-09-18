@@ -5,7 +5,6 @@
 
 # 设置默认端口，确保变量有初始值
 SGLANG_JUDGE_PORT=${SGLANG_JUDGE_PORT:-30000}
-SGLANG_JUDGE_MEM_FRACTION_STATIC=${SGLANG_JUDGE_MEM_FRACTION_STATIC:-0.10}
 SGLANG_JUDGE_MODEL_PATH="${MODEL_DIR}/Qwen2.5-1.5B-Instruct"
 SGLANG_JUDGE_PID=""
 LOG_FILE="logs/sglang_judge_${TIMESTAMP}.log"
@@ -42,8 +41,7 @@ python -m sglang.launch_server \
     --model-path "$SGLANG_JUDGE_MODEL_PATH" \
     --port "$SGLANG_JUDGE_PORT" \
     --api-key "EMPTY" \
-    --mem-fraction-static "$SGLANG_JUDGE_MEM_FRACTION_STATIC" \
-    --mm-feature-transport cpu \
+    --mem-fraction-static 0.05 \
     --disable-cuda-graph \
     > "$LOG_FILE" 2>&1 &
 
@@ -66,14 +64,7 @@ wait_for_sglang_ready() {
     # 健康检查
     while [ $attempt -le $max_attempts ]; do
         local http_status
-        if ! kill -0 "$SGLANG_JUDGE_PID" 2>/dev/null; then
-            echo "Error: Sglang judge process exited before becoming ready."
-            tail -n 40 "$LOG_FILE" 2>/dev/null || true
-            return 1
-        fi
-        if ! http_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "$url" 2>/dev/null); then
-            http_status="000"
-        fi
+        http_status=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "$url" 2>/dev/null || echo "000")
 
         if [ -z "$http_status" ]; then
             http_status="000"
@@ -109,5 +100,40 @@ fi
 export DEEPEYES_JUDGE_API_KEY="EMPTY"
 export DEEPEYES_JUDGE_BASE_URL="http://127.0.0.1:${SGLANG_JUDGE_PORT}/v1"
 export DEEPEYES_JUDGE_MODELS="Qwen2.5-1.5B-Instruct"
+
+if [ -n "${RUNTIME_ENV_JSON:-}" ]; then
+    json_escape() {
+        local value="${1:-}"
+        value=${value//\\/\\\\}
+        value=${value//\"/\\\"}
+        value=${value//$'\n'/\\n}
+        value=${value//$'\r'/\\r}
+        value=${value//$'\t'/\\t}
+        printf '%s' "$value"
+    }
+
+    runtime_env_prefix="${RUNTIME_ENV_JSON%$'\n}\n}'}"
+    export RUNTIME_ENV_JSON="${runtime_env_prefix},
+   \"DEEPEYES_JUDGE_API_KEY\": \"$(json_escape "${DEEPEYES_JUDGE_API_KEY}")\",
+   \"DEEPEYES_JUDGE_BASE_URL\": \"$(json_escape "${DEEPEYES_JUDGE_BASE_URL}")\",
+   \"DEEPEYES_JUDGE_MODELS\": \"$(json_escape "${DEEPEYES_JUDGE_MODELS}")\"
+}
+}"
+fi
+
+ray() {
+    if [ "$1" = "job" ] && [ "$2" = "submit" ] && [ -n "${RUNTIME_ENV_JSON:-}" ]; then
+        local arg=""
+        for arg in "$@"; do
+            if [ "$arg" = "--runtime-env-json" ] || [[ "$arg" == --runtime-env-json=* ]]; then
+                command ray "$@"
+                return
+            fi
+        done
+        command ray job submit ${RAY_NO_WAIT:+--no-wait} --runtime-env-json="${RUNTIME_ENV_JSON}" "${@:3}"
+        return
+    fi
+    command ray "$@"
+}
 
 echo "Sglang judge service is fully ready for use."

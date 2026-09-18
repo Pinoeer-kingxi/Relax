@@ -23,12 +23,8 @@ _SMOKE_SPEC = importlib.util.spec_from_file_location("task10_smoke_search", SMOK
 assert _SMOKE_SPEC is not None and _SMOKE_SPEC.loader is not None
 _SMOKE_MODULE = importlib.util.module_from_spec(_SMOKE_SPEC)
 _SMOKE_SPEC.loader.exec_module(_SMOKE_MODULE)
-SmokeConfigurationError = _SMOKE_MODULE.SmokeConfigurationError
-parse_credentials_env = _SMOKE_MODULE.parse_credentials_env
-build_user_content = _SMOKE_MODULE._user_content
 valid_result_schema = _SMOKE_MODULE.valid_result_schema
 result_fingerprint = _SMOKE_MODULE.result_fingerprint
-code_state = _SMOKE_MODULE.code_state
 ScriptedModelHandler = _SMOKE_MODULE._ScriptedModelHandler
 UNIFIED_SYSTEM_PROMPT = _SMOKE_MODULE.UNIFIED_SYSTEM_PROMPT
 
@@ -78,40 +74,6 @@ class _FailingRetrieverHandler(BaseHTTPRequestHandler):
         return
 
 
-def test_credentials_parser_accepts_explicit_single_line_forms(tmp_path):
-    credentials = tmp_path / ".env"
-    credentials.write_text("UNRELATED=$(ignored)\nexport tvly_api_key='test-value'\n", encoding="utf-8")
-    assert parse_credentials_env(credentials, "tvly_api_key") == "test-value"
-
-
-def test_credentials_parser_rejects_duplicate_or_executable_values(tmp_path):
-    credentials = tmp_path / ".env"
-    credentials.write_text("tvly_api_key=one\ntvly_api_key=two\n", encoding="utf-8")
-    try:
-        parse_credentials_env(credentials, "tvly_api_key")
-    except SmokeConfigurationError as exc:
-        assert "more than once" in str(exc)
-    else:
-        raise AssertionError("duplicate credentials were accepted")
-
-    credentials.write_text("tvly_api_key=$(unsafe)\n", encoding="utf-8")
-    try:
-        parse_credentials_env(credentials, "tvly_api_key")
-    except SmokeConfigurationError as exc:
-        assert "unsupported" in str(exc)
-    else:
-        raise AssertionError("executable dotenv syntax was accepted")
-
-
-def test_smoke_user_content_can_include_an_image(tmp_path):
-    image = tmp_path / "sample.png"
-    image.write_bytes(b"small-fixture")
-    content = build_user_content("search with image", image)
-    assert isinstance(content, list)
-    assert content[0]["type"] == "text"
-    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
-
-
 def test_smoke_result_schema_is_strict():
     valid = {
         "elapsed_time": 0.1,
@@ -122,15 +84,11 @@ def test_smoke_result_schema_is_strict():
     assert not valid_result_schema({"elapsed_time": 0.1, "data": [{"title": "T"}]})
 
 
-def test_result_fingerprint_ignores_timing_and_code_state_is_well_formed():
+def test_result_fingerprint_ignores_timing():
     first = {"elapsed_time": 0.1, "data": [{"title": "T", "link": "", "snippet": "S", "date": None}]}
     second = {"elapsed_time": 9.9, "data": first["data"]}
 
     assert result_fingerprint(first) == result_fingerprint(second)
-    state = code_state()
-    assert len(state["sha"]) == 40
-    assert isinstance(state["dirty"], bool)
-    assert len(state["worktree_fingerprint"]) == 16
 
 
 def test_local_retriever_to_real_agent_subprocess(tmp_path):
@@ -147,11 +105,8 @@ def test_local_retriever_to_real_agent_subprocess(tmp_path):
                     "top_k: 1",
                     "timeout_s: 2",
                     "max_retries: 0",
-                    "retry_budget_s: 3",
-                    "backoff_initial_s: 0",
-                    "backoff_max_s: 0",
+                    "backoff_s: 0",
                     "trust_env: false",
-                    "max_response_bytes: 4096",
                     "max_observation_chars: 4096",
                     "retriever:",
                     f"  url: http://127.0.0.1:{server.server_port}/retrieve",
@@ -218,11 +173,8 @@ def _run_agent_wrapper(
                     "top_k: 1",
                     "timeout_s: 2",
                     f"max_retries: {max_retries}",
-                    "retry_budget_s: 3",
-                    "backoff_initial_s: 0",
-                    "backoff_max_s: 0",
+                    "backoff_s: 0",
                     "trust_env: false",
-                    "max_response_bytes: 4096",
                     "max_observation_chars: 4096",
                     "retriever:",
                     f"  url: http://127.0.0.1:{retriever_port}/retrieve",
@@ -295,17 +247,7 @@ def test_run_agent_wrapper_propagates_live_retriever_config(tmp_path):
         assert output["metadata"]["web_search_result_count"] == 1
         assert output["metadata"]["web_search_backend"] == "retriever"
         assert output["metadata"]["web_search_elapsed_time_s"] >= 0
-        assert len(output["metadata"]["web_search_observation_fingerprints"]) == 1
-        assert output["metadata"]["web_search_runtime_metrics"] == {
-            "cache_hit_count": 0,
-            "circuit_open_count": 0,
-            "failure_count": 0,
-            "http_attempt_count": 1,
-            "retry_count": 0,
-            "search_count": 1,
-        }
         assert len(ScriptedModelHandler.requests) == 2
-        assert all(request["max_tokens"] == 4096 for request in ScriptedModelHandler.requests)
         assert _RetrieverHandler.requests == [{"queries": ["offline smoke marker"], "topk": 1, "return_scores": True}]
     finally:
         retriever.shutdown()
@@ -329,9 +271,6 @@ def test_retriever_failure_retries_and_agent_still_answers(tmp_path):
         assert output["metadata"]["final_answer"] == "search observation missing"
         assert output["metadata"]["web_search_attempt_count"] == 1
         assert output["metadata"]["web_search_result_count"] == 0
-        assert output["metadata"]["web_search_runtime_metrics"]["failure_count"] == 1
-        assert output["metadata"]["web_search_runtime_metrics"]["http_attempt_count"] == 2
-        assert output["metadata"]["web_search_runtime_metrics"]["retry_count"] == 1
     finally:
         retriever.shutdown()
         retriever.server_close()
