@@ -15,7 +15,10 @@ if [ ! -x "${VENV_DIR}/bin/python" ]; then
     uv venv --python "$(command -v python3)" --system-site-packages "${VENV_DIR}"
 fi
 
-uv pip install --python "${VENV_DIR}/bin/python" --no-deps faiss-gpu==1.14.3
+# This CUDA-12 build is verified with the repository host's Torch 2.6/CUDA
+# 12.4 stack. The generic ``faiss-gpu`` 1.14.3 wheel can load incompatible
+# cuBLAS symbols before Torch and fail on the first encoder inference.
+uv pip install --python "${VENV_DIR}/bin/python" faiss-gpu-cu12==1.14.1.post1
 
 "${VENV_DIR}/bin/python" -c '
 import faiss
@@ -23,6 +26,9 @@ import sys
 import torch
 
 faiss.StandardGpuResources()
+probe = torch.ones((2, 2), device="cuda")
+torch.mm(probe, probe)
+torch.cuda.synchronize()
 print(f"python={sys.executable}")
 print(f"torch={torch.__version__}, cuda={torch.version.cuda}, gpu={torch.cuda.get_device_name(0)}")
 '

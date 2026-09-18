@@ -96,7 +96,9 @@ The script uses these upstream artifacts:
 
 The official `wiki-18.jsonl.gz` artifact is a gzip-compressed tar archive. The script extracts
 `data00/jiajie_jin/flashrag_indexes/wiki_dpr_100w/wiki_dump.jsonl` as `wiki-18.jsonl`. The E5 Flat index is the
-concatenation of the official `part_aa` and `part_ab` files in that order. The QA conversion preserves each official
+concatenation of the official `part_aa` and `part_ab` files in that order. To avoid requiring another 60 GiB while
+assembling it, the script moves the first part to a resumable `.partial` file, appends the second part, validates the
+official byte sizes, and removes the downloaded parts after the final index is complete. The QA conversion preserves each official
 `prompt` and `extra_info` value and copies `golden_answers` into `extra_info.answers`. The E5 download contains the
 config, safetensors weights, and tokenizer files consumed by `AutoModel` and `AutoTokenizer`.
 
@@ -110,8 +112,6 @@ ${SEARCH_R1_DATA_ROOT}/
 ├── retrieval/wiki18_e5_flat/
 │   ├── wiki-18.jsonl.gz
 │   ├── wiki-18.jsonl
-│   ├── part_aa
-│   ├── part_ab
 │   └── e5_Flat.index
 └── models/e5-base-v2/
 ```
@@ -175,11 +175,24 @@ export SEARCH_R1_RETRIEVER_ENV_ROOT=/path/to/node-local/search-r1-retriever
 bash examples/search_r1/scripts/prepare_retriever_env.sh
 ```
 
+The preparation script pins the CUDA-12 FAISS wheel that is validated with
+the repository host's Torch/CUDA stack; do not substitute the similarly named
+generic wheel without rerunning encoder-plus-FAISS inference, because both
+packages load CUDA runtime libraries into the same process.
+
 The service exposes `POST /retrieve` and accepts:
 
 ```json
 {"queries":["query"],"topk":3}
 ```
+
+`GET /healthz` is a process liveness check, `GET /readyz` returns 503 until
+the FAISS index and encoder are ready, and `GET /metrics` reports queue depth,
+request/batch/query counts, completions, failures, cancellations, overload
+rejections, and the largest observed batch. Concurrent calls are coalesced up
+to `SEARCH_R1_RETRIEVER_MAX_BATCH_QUERIES`; a full bounded queue waits for
+`SEARCH_R1_RETRIEVER_QUEUE_TIMEOUT_S` and then returns HTTP 503 instead of
+growing memory without limit.
 
 Set the training host endpoint to the retriever host, for example:
 
