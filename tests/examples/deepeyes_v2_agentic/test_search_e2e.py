@@ -186,7 +186,10 @@ def test_local_retriever_to_real_agent_subprocess(tmp_path):
             timeout=30,
             check=False,
         )
-        assert completed.returncode == 0, completed.stderr
+        diagnostics = completed.stderr
+        if report.exists():
+            diagnostics = f"{diagnostics}\nsmoke report:\n{report.read_text(encoding='utf-8')}"
+        assert completed.returncode == 0, diagnostics
         payload = json.loads(report.read_text(encoding="utf-8"))
         assert payload["status"] == "passed"
         assert payload["backend"] == "retriever"
