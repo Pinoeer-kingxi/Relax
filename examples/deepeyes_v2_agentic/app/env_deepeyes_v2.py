@@ -14,14 +14,15 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
+import html
 import json
-import logging
 import re
 from dataclasses import dataclass, field
 from datetime import timedelta
 from io import BytesIO
 from math import ceil
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from app.prompt import (
     INITIALIZATION_CODE_TEMPLATE,
@@ -33,11 +34,14 @@ from app.prompt import (
 from app.sandboxes.base import BaseSandboxSession, SandboxCapability
 from app.sandboxes.exceptions import SandboxError
 from app.sandboxes.executor import SandboxExecutor
+from app.search_backends import SearchConfigurationError, SearchSession, resolve_search_config
 from app.search_utils import image_search, search
 from PIL import Image, UnidentifiedImageError
 
+from relax.utils.logging_utils import get_logger
 
-logger = logging.getLogger(__name__)
+
+logger = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Tag patterns (single-source-of-truth, also covered by test_env_extractors.py)
@@ -45,7 +49,8 @@ logger = logging.getLogger(__name__)
 ANSWER_RE = re.compile(r"<answer>(.*?)</answer>", re.DOTALL)
 CODE_BLOCK_RE = re.compile(r"<code>(.*?)</code>", re.DOTALL)
 PYTHON_FENCE_RE = re.compile(r"```python\s*\n(.*?)\n```", re.DOTALL)
-TOOL_CALL_RE = re.compile(r"<tool_call>(.*?)</tool_call>", re.DOTALL)
+TOOL_CALL_OPEN = "<tool_call>"
+TOOL_CALL_CLOSE = "</tool_call>"
 
 SUPPORTED_TOOL_NAMES = {"search", "image_search"}
 MAX_IMAGES_PER_ROUND = 10
@@ -91,14 +96,20 @@ def extract_tool_call(text: str) -> Optional[dict[str, Any]]:
     """Return ``{"name": str, "arguments": Any | None}`` or ``None``.
 
     Picks the last ``<tool_call>`` block (xide also iterated last-match) and
-    parses its JSON body. Returns ``None`` if no block is present, the JSON is
-    malformed, or the payload lacks a string ``name``.
+    parses its JSON body. A missing final ``</tool_call>`` is accepted only
+    when the remaining text is itself one complete JSON object. SGLang omits
+    matched stop tokens from generated text, and the production config uses the
+    closing-tag token as a GPU-side stop. Returns ``None`` if no block is
+    present, the JSON is malformed, or the payload lacks a string ``name``.
     """
-    matches = list(TOOL_CALL_RE.finditer(text))
-    if not matches:
+    start = text.rfind(TOOL_CALL_OPEN)
+    if start < 0:
         return None
+    body_start = start + len(TOOL_CALL_OPEN)
+    end = text.find(TOOL_CALL_CLOSE, body_start)
+    body = text[body_start:] if end < 0 else text[body_start:end]
     try:
-        payload = json.loads(matches[-1].group(1).strip())
+        payload = json.loads(body.strip())
     except (json.JSONDecodeError, ValueError):
         return None
     if not isinstance(payload, dict):
@@ -188,6 +199,7 @@ class DeepEyesV2Env:
         image: Optional[Image.Image],
         code_timeout_s: int = 200,
         ensure_sandbox_timeout_s: int = 240,
+        web_search_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.data_index = data_index
         self._executor = sandbox_executor
@@ -198,6 +210,19 @@ class DeepEyesV2Env:
         self._session_ctx = None
         self._initialized = False
         self._init_lock = asyncio.Lock()
+        self.web_search_attempt_count = 0
+        self.web_search_result_count = 0
+        self.web_search_elapsed_time_s = 0.0
+        self.web_search_observation_fingerprints: list[str] = []
+        self.web_search_runtime_metrics: dict[str, int] = {}
+        try:
+            self._web_search_config = resolve_search_config(web_search_config)
+            self._web_search_session = SearchSession(self._web_search_config)
+            self.web_search_backend = self._web_search_config["backend"]
+        except SearchConfigurationError:
+            self._web_search_config = None
+            self._web_search_session = None
+            self.web_search_backend = "invalid"
 
     # ---- public tool handlers ---------------------------------------------
 
@@ -298,6 +323,11 @@ class DeepEyesV2Env:
         return ToolObs(body_text=body, images=images, done=False, error=None)
 
     async def close(self) -> None:
+        search_session = self._web_search_session
+        self._web_search_session = None
+        if search_session is not None:
+            self.web_search_runtime_metrics = search_session.snapshot_metrics()
+            search_session.close()
         ctx = self._session_ctx
         if ctx is None:
             return
@@ -444,23 +474,34 @@ class DeepEyesV2Env:
                 }
 
         # tool_name == "search"
-        query = tool_args["query"] if isinstance(tool_args, dict) and "query" in tool_args else str(tool_args)
-        result = search(query)
+        if not isinstance(tool_args, dict) or not isinstance(tool_args.get("query"), str):
+            return {
+                "status": "error",
+                "result": "Error: search arguments must contain a string query.",
+                "images": [],
+            }
+        query = tool_args["query"].strip()
+        if not query:
+            return {"status": "error", "result": "Error: search query is empty.", "images": []}
+        if self._web_search_config is None:
+            return {
+                "status": "error",
+                "result": "Error: web search configuration is invalid.",
+                "images": [],
+            }
+        self.web_search_attempt_count += 1
+        result = search(query, config=self._web_search_config, session=self._web_search_session)
+        if self._web_search_session is not None:
+            self.web_search_runtime_metrics = self._web_search_session.snapshot_metrics()
         if result == "Error":
             return {"status": "error", "result": "Error", "images": []}
-        snippets: list[str] = []
+        self.web_search_result_count += len(result.get("data", []))
+        self.web_search_elapsed_time_s += float(result.get("elapsed_time", 0.0))
         try:
-            for idx, page in enumerate(result["data"]):
-                date_published = ""
-                if page.get("date") is not None:
-                    date_published = "\nDate published: " + page["date"]
-                snippet = ""
-                if page.get("snippet") is not None:
-                    snippet = "\n" + page["snippet"]
-                snippets.append(f"{idx + 1}. [{page['title']}]({page['link']}){date_published}{snippet}")
-            content = (
-                f"A Google search for '{query}' found {len(snippets)} results:"
-                f"\n\n## Web Results\n" + "\n\n".join(snippets)
+            content = _format_web_results(
+                query,
+                result["data"],
+                max_chars=self._web_search_config["max_observation_chars"],
             )
         except (KeyError, TypeError) as exc:
             return {
@@ -468,4 +509,48 @@ class DeepEyesV2Env:
                 "result": f"{exc} No results found for '{query}'. Try with a more general query.",
                 "images": [],
             }
+        fingerprint = hashlib.sha256(content.encode()).hexdigest()[:16]
+        self.web_search_observation_fingerprints.append(fingerprint)
         return {"status": "success", "result": content, "images": []}
+
+
+def _escape_markdown(value: str) -> str:
+    escaped = html.escape(value, quote=False)
+    return re.sub(r"([\\`*_{}\[\]()#+.!|>-])", r"\\\1", escaped)
+
+
+def _clip_search_field(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1] + "…"
+
+
+def _format_web_results(query: str, pages: list[dict[str, Any]], *, max_chars: int) -> str:
+    """Render trusted structure and untrusted backend text within a hard
+    budget."""
+    displayed_query = _escape_markdown(_clip_search_field(query, 512))
+    header = f"A web search for '{displayed_query}' found {len(pages)} results:\n\n## Web Results"
+    blocks: list[str] = []
+    displayed = 0
+    for idx, page in enumerate(pages):
+        title = _escape_markdown(_clip_search_field(page["title"], 256))
+        link = _clip_search_field(page.get("link") or "", 2048)
+        link = html.escape(link.replace("\\", "%5C").replace("(", "%28").replace(")", "%29"), quote=True)
+        first_line = f"{idx + 1}. [{title}]({link})" if link else f"{idx + 1}. **{title}**"
+        lines = [first_line]
+        if page.get("date"):
+            lines.append("Date published: " + _escape_markdown(_clip_search_field(page["date"], 128)))
+        if page.get("snippet"):
+            lines.append(_escape_markdown(_clip_search_field(page["snippet"], 2048)))
+        block = "\n".join(lines)
+        candidate = header + ("\n\n" + "\n\n".join([*blocks, block]) if blocks or block else "")
+        if len(candidate) > max_chars:
+            break
+        blocks.append(block)
+        displayed += 1
+    content = header + ("\n\n" + "\n\n".join(blocks) if blocks else "")
+    if displayed < len(pages):
+        marker = f"\n\n...[displayed {displayed} of {len(pages)} results; remaining results omitted]"
+        if len(content) + len(marker) <= max_chars:
+            content += marker
+    return content[:max_chars]

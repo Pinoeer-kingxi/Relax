@@ -2,8 +2,8 @@
 
 """Search tool helpers for the DeepEyesV2 env.
 
-* :func:`search` is a placeholder web-search returning canned snippets so the
-  recipe runs end-to-end without a real backend.
+* :func:`search` dispatches to a deterministic mock, Search-R1 retriever, or a
+  configured external HTTP API.
 * :func:`image_search` serves cached results keyed by ``data_idx`` from JSON
   files listed in ``DEEPEYES_V2_SEARCH_CACHE_PATHS`` (colon/comma-separated).
   Missing / unparsable caches degrade to returning ``"Error"`` so the env
@@ -13,13 +13,15 @@
 from __future__ import annotations
 
 import json
-import logging
 import os
-import random
-import time
+from typing import Any, Mapping
+
+from app.search_backends import SearchBackendError, SearchConfigurationError, SearchSession, run_search
+
+from relax.utils.logging_utils import get_logger
 
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _load_image_search_cache() -> dict:
@@ -63,34 +65,27 @@ def _get_image_search_cache() -> dict:
     return _IMAGE_SEARCH_CACHE
 
 
-def search(query: str, size: int = 5):
-    """Web-search placeholder. Returns canned snippets in the shape::
+def search(
+    query: str,
+    size: int | None = None,
+    *,
+    config: Mapping[str, Any] | None = None,
+    session: SearchSession | None = None,
+):
+    """Run text search and return the environment's stable result shape::
 
         {"elapsed_time": float, "data": [{"title", "link", "snippet", "date"?}, ...]}
 
-    Replace with a real backend (Serper / Google / Bing / internal) for
-    production training.
+    Search failures preserve the existing ``"Error"`` convention so a session
+    can continue reasoning instead of crashing.
     """
-    max_try = 3
-    result = "Error"
-    for try_idx in range(max_try):
-        try:
-            result = {"elapsed_time": 0.0, "data": []}
-            for i in range(size):
-                result["data"].append(
-                    {
-                        "snippet": f"This is a placeholder snippet for query: {query}",
-                        "title": f"Placeholder Title {i}",
-                        "link": f"http://example.com/{i}",
-                    }
-                )
-            break
-        except Exception as e:
-            logger.warning(f"[search] attempt {try_idx + 1}/{max_try} failed: {e}")
-            result = "Error"
-            if try_idx < max_try - 1:
-                time.sleep((try_idx + 1) * random.randint(1, 5))
-    return result
+    try:
+        if session is not None:
+            return session.search(query, size=size)
+        return run_search(query, size=size, config=config)
+    except (SearchBackendError, SearchConfigurationError) as exc:
+        logger.warning(f"[search] backend failed: {type(exc).__name__}")
+        return "Error"
 
 
 def image_search(_query, data_idx: str | None = None):

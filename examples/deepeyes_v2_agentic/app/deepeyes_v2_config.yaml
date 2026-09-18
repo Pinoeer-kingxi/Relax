@@ -1,13 +1,25 @@
 max_turns: 9
+max_completion_tokens: 4096
 code_timeout_s: 200
 ensure_sandbox_timeout_s: 240
 sandbox_backend: apptainer_jupyter  # only backend in Phase 1
 
+# Default is deterministic and offline. Select a production backend with
+# DEEPEYES_V2_WEB_SEARCH_CONFIG or the documented environment overrides.
+web_search:
+  backend: mock
+  top_k: 5
+  max_observation_chars: 12000
+  cache_ttl_s: 0
+  cache_max_entries: 128
+  circuit_breaker_failures: 5
+  circuit_breaker_reset_s: 30
+
 # Single-token stops bypass the detokenizer entirely — SGLang matches them
 # on the GPU side against generated token ids, no subprocess round-trip.
-# Token ids below are for the Qwen3-VL / Qwen3.5 / Qwen3.6 tokenizer family
-# (vocab 248044 base + added special tokens 248045..). If you swap to a
-# different tokenizer, re-derive with:
+# Token ids below are for the recipe's configured Qwen3.6 checkpoint tokenizer
+# (vocab 248044 base + added special tokens 248045..). Qwen model families do
+# not all share these ids; if you swap checkpoints, re-derive with:
 #   python -c "from transformers import AutoTokenizer; \
 #       t = AutoTokenizer.from_pretrained('<model>', trust_remote_code=True); \
 #       print(t.encode('</tool_call>', add_special_tokens=False))"
