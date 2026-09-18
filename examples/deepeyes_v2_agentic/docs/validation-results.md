@@ -41,7 +41,7 @@ python examples/deepeyes_v2_agentic/scripts/smoke_search.py \
 ## Tavily external search
 
 The external adapter used the committed Tavily configuration with direct
-networking and loaded the credential from an explicitly selected dotenv key.
+networking and loaded the credential from `TAVILY_API_KEY`.
 The smoke request returned five real results; schema, successful-search, and
 non-placeholder checks all passed.
 
