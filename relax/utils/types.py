@@ -1,5 +1,6 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
+import copy
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -7,20 +8,13 @@ from typing import Any
 import numpy as np
 import torch
 
-
-_SPEC_TOKEN_COUNT_KEYS = (
-    ("spec_num_correct_drafts", "spec_num_proposed_drafts"),
-    ("spec_accepted_drafts", "spec_proposed_drafts"),
-    ("spec_accept_token_num", "spec_draft_token_num"),
-)
+from relax.utils.speculative import SpeculativeCounts
 
 
 def get_spec_token_counts(meta_info: dict[str, Any]) -> tuple[int, int]:
-    """Extract speculative decoding counts across SGLang metadata versions."""
-    for accept_key, draft_key in _SPEC_TOKEN_COUNT_KEYS:
-        if accept_key in meta_info and draft_key in meta_info:
-            return int(meta_info.get(accept_key, 0) or 0), int(meta_info.get(draft_key, 0) or 0)
-    return 0, 0
+    """Read accepted/proposed aliases for legacy per-sample counters."""
+    counts = SpeculativeCounts.from_meta_info(meta_info)
+    return counts.accepted or 0, counts.proposed or 0
 
 
 @dataclass
@@ -98,6 +92,9 @@ class Sample:
         spec_verify_ct: int = 0
         completion_token_num: int = 0
 
+        counts: SpeculativeCounts | None = None
+        legacy_counts: bool = False
+
         @property
         def spec_accept_rate(self) -> float:
             return self.spec_accept_token_num / self.spec_draft_token_num if self.spec_draft_token_num > 0 else 0.0
@@ -107,11 +104,14 @@ class Sample:
             return self.completion_token_num / self.spec_verify_ct if self.spec_verify_ct > 0 else 0.0
 
         def add(self, meta_info: dict):
-            spec_accept_token_num, spec_draft_token_num = get_spec_token_counts(meta_info)
-            self.spec_accept_token_num += spec_accept_token_num
-            self.spec_draft_token_num += spec_draft_token_num
-            self.spec_verify_ct += meta_info.get("spec_verify_ct", 0)
-            self.completion_token_num += meta_info.get("completion_tokens", 0)
+            counts = SpeculativeCounts.from_meta_info(meta_info)
+            if not self.legacy_counts:
+                self.counts = counts if self.counts is None else self.counts.plus(counts)
+            accepted, proposed = get_spec_token_counts(meta_info)
+            self.spec_accept_token_num += accepted
+            self.spec_draft_token_num += proposed
+            self.spec_verify_ct += counts.verify or 0
+            self.completion_token_num += counts.completion or 0
 
         def to_dict(self):
             return {
@@ -119,18 +119,36 @@ class Sample:
                 "spec_draft_token_num": self.spec_draft_token_num,
                 "spec_verify_ct": self.spec_verify_ct,
                 "completion_token_num": self.completion_token_num,
+                "counts": self.counts.to_dict() if self.counts is not None else None,
+                "legacy_counts": self.legacy_counts,
             }
 
         @staticmethod
         def from_dict(data: dict):
+            data = data or {}
             info = Sample.SpecInfo()
-            info.spec_accept_token_num = data.get("spec_accept_token_num", 0)
-            info.spec_draft_token_num = data.get("spec_draft_token_num", 0)
-            info.spec_verify_ct = data.get("spec_verify_ct", 0)
-            info.completion_token_num = data.get("completion_token_num", 0)
+            legacy = SpeculativeCounts.from_meta_info(
+                {
+                    "spec_accept_token_num": data.get("spec_accept_token_num"),
+                    "spec_draft_token_num": data.get("spec_draft_token_num"),
+                    "spec_verify_ct": data.get("spec_verify_ct"),
+                    "completion_tokens": data.get("completion_token_num"),
+                }
+            )
+            info.spec_accept_token_num = legacy.accepted or 0
+            info.spec_draft_token_num = legacy.proposed or 0
+            info.spec_verify_ct = legacy.verify or 0
+            info.completion_token_num = legacy.completion or 0
+            if data.get("counts") is not None:
+                info.counts = SpeculativeCounts.from_dict(data["counts"])
+            if "legacy_counts" in data:
+                info.legacy_counts = bool(data["legacy_counts"])
+            else:
+                info.legacy_counts = data.get("counts") is None
             return info
 
     spec_info: SpecInfo = field(default_factory=SpecInfo)
+    spec_generations: list[dict[str, Any]] | None = None
 
     @dataclass
     class PrefixCacheInfo:
@@ -165,6 +183,7 @@ class Sample:
         value = self.__dict__.copy()
         value["status"] = self.status.value
         value["spec_info"] = self.spec_info.to_dict()
+        value["spec_generations"] = copy.deepcopy(self.spec_generations)
         value["prefix_cache_info"] = self.prefix_cache_info.to_dict()
         return value
 
@@ -173,6 +192,7 @@ class Sample:
         data = dict(data)
         data["status"] = Sample.Status(data["status"])
         data["spec_info"] = Sample.SpecInfo.from_dict(data.get("spec_info", {}))
+        data["spec_generations"] = copy.deepcopy(data.get("spec_generations"))
         data["prefix_cache_info"] = Sample.PrefixCacheInfo.from_dict(data.get("prefix_cache_info", {}))
 
         field_names = set(Sample.__dataclass_fields__.keys())
@@ -198,9 +218,7 @@ class Sample:
 
         And extract
         """
-        if args.sglang_speculative_algorithm:
-            # cannot directly use spec info from sglang because of partial rollout.
-            self.spec_info.add(meta_info=meta_info)
+        self.spec_info.add(meta_info=meta_info)
 
         # Collect prefix cache statistics
         self.prefix_cache_info.add(meta_info=meta_info)

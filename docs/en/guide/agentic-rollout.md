@@ -542,6 +542,17 @@ provides training credit. Store every signal used by the advantage function in e
 - Top-level numeric fields in output metadata use `<field>/mean|median|max|min`, without a `rollout/` prefix.
 - Complete metadata remains available in rollout dumps.
 
+Agentic exports also retain each committed generation ID and its
+`accepted`/`proposed`/`verify`/`completion` counters. A rollout batch
+deduplicates `(session_id, generation_id)` before computing
+`spec/accept_rate = sum(accepted) / sum(proposed)` and
+`spec/tokens_per_verify = sum(completion) / sum(verify)`. The corresponding
+`spec/*_count_coverage` fields distinguish missing counters from explicit zero
+values; ratios with an unavailable or zero denominator are omitted. The
+legacy `spec_accept_rate` and `spec_accept_length` names remain arithmetic
+sample averages when complete per-sample counters are available. These metrics cover
+committed nodes present in exported samples and exclude discarded branches.
+
 With `--log-passrate`, multi-context Sessions use explicit export and attach reward to exactly one representative
 context, usually `main`. Set the selected primary reward value to `1` for success or `0` otherwise; for a reward object,
 `--reward-key` selects that value. Leave reward unset on sibling contexts. Other contexts can carry the outcome in

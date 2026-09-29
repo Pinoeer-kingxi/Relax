@@ -526,6 +526,15 @@ advantage 提供。Advantage 函数使用的每项信号都应写入 export meta
 - Output metadata 的顶层 numeric field 使用 `<field>/mean|median|max|min`，不带 `rollout/` 前缀。
 - Rollout dump 保留完整 metadata。
 
+Agentic 导出还会保留每个已提交生成节点的 ID 及
+`accepted`/`proposed`/`verify`/`completion` 计数。一个 rollout 指标批次先按
+`(session_id, generation_id)` 去重，再计算
+`spec/accept_rate = sum(accepted) / sum(proposed)` 和
+`spec/tokens_per_verify = sum(completion) / sum(verify)`。对应的
+`spec/*_count_coverage` 区分缺失计数与显式 0；分母缺失或为 0 时省略比率。
+旧的 `spec_accept_rate` 和 `spec_accept_length` 在每个样本的计数完整时继续表示
+样本算术平均。指标只覆盖本次导出样本中的已提交节点，不统计被丢弃分支。
+
 启用 `--log-passrate` 时，multi-context Session 使用显式导出，并且只有一个代表 context 携带 reward，通常是
 `main`。选中的 primary reward value 成功时设为 `1`，其他情况设为 `0`；reward object 通过 `--reward-key` 选择该
 值。Sibling context 不设置 reward。Custom advantage 需要同一 outcome 时，其他 context 可以在 metadata 中保存
