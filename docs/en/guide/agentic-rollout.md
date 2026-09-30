@@ -556,7 +556,8 @@ sample averages when complete per-sample counters are available. These metrics c
 committed nodes present in exported samples and exclude discarded branches.
 Legacy deserialization preserves unknown counters through repeated JSON serialization
 and resumed generation. Compatibility ratios require a known numerator and a known,
-positive denominator for every sample; otherwise that ratio is omitted. An explicit
+positive denominator for every sample, including batches mixing new and legacy samples;
+otherwise that ratio is omitted. An explicit
 zero numerator can still produce a valid 0%. Legacy payloads retain `legacy_counts`;
 they do not establish generation identity or coverage for the new metrics.
 When speculative decoding is disabled and no speculative-only counters are

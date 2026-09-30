@@ -116,3 +116,31 @@ def test_untracked_content_addressed_node_does_not_become_complete_later() -> No
     _response(forest, prompt, "known", "same", SpeculativeCounts(9, 10))
     sample = forest.build_sample(leaf_state_hash=legacy.state_hash, tokenizer=_Tokenizer())
     assert sample.spec_generations is None
+
+
+def test_backend_metadata_uses_normalized_counters_for_legacy_totals() -> None:
+    for invalid in (-1, "invalid"):
+        request = SimpleNamespace(
+            pending_weight_version_delta=[],
+            pending_spec_counts=None,
+            pending_spec_delta=dict.fromkeys(
+                ("spec_accept_token_num", "spec_draft_token_num", "spec_verify_ct", "completion_token_num"), 0
+            ),
+            pending_prefix_cache_delta={"cached_tokens": 0, "total_prompt_tokens": 0},
+        )
+        AgenticSessionShard._accumulate_request_meta(
+            request,
+            meta_info={
+                "spec_accept_token_num": 1,
+                "spec_draft_token_num": 2,
+                "spec_verify_ct": invalid,
+                "completion_tokens": invalid,
+            },
+        )
+        assert request.pending_spec_counts == SpeculativeCounts(1, 2, None, None)
+        assert request.pending_spec_delta == {
+            "spec_accept_token_num": 1,
+            "spec_draft_token_num": 2,
+            "spec_verify_ct": 0,
+            "completion_token_num": 0,
+        }

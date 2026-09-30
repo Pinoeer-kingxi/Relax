@@ -1649,8 +1649,8 @@ class AgenticSessionShard:
             request.pending_spec_counts = request.pending_spec_counts.plus(counts)
         request.pending_spec_delta["spec_accept_token_num"] += counts.accepted or 0
         request.pending_spec_delta["spec_draft_token_num"] += counts.proposed or 0
-        request.pending_spec_delta["spec_verify_ct"] += int(meta_info.get("spec_verify_ct", 0) or 0)
-        request.pending_spec_delta["completion_token_num"] += int(meta_info.get("completion_tokens", 0) or 0)
+        request.pending_spec_delta["spec_verify_ct"] += counts.verify or 0
+        request.pending_spec_delta["completion_token_num"] += counts.completion or 0
         request.pending_prefix_cache_delta["cached_tokens"] += int(meta_info.get("cached_tokens", 0) or 0)
         request.pending_prefix_cache_delta["total_prompt_tokens"] += int(meta_info.get("prompt_tokens", 0) or 0)
 

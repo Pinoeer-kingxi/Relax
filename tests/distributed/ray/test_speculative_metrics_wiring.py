@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from relax.utils.speculative import SpeculativeCounts, SpeculativeGeneration
+from relax.utils.types import Sample
 
 
 try:
@@ -17,8 +18,8 @@ def _record(generation_id: str, counts: SpeculativeCounts) -> dict:
     return SpeculativeGeneration("session", generation_id, f"state-{generation_id}", counts).to_dict()
 
 
-def _sample(*records: dict) -> SimpleNamespace:
-    return SimpleNamespace(spec_generations=list(records), session_id="session")
+def _sample(*records: dict) -> Sample:
+    return Sample(spec_generations=list(records), session_id="session")
 
 
 def test_compute_spec_metrics_emits_weighted_metrics() -> None:
@@ -37,10 +38,8 @@ def test_compute_spec_metrics_emits_weighted_metrics() -> None:
 def test_compute_spec_metrics_keeps_disabled_non_speculative_batches_empty() -> None:
     args = SimpleNamespace(sglang_speculative_algorithm=None)
     samples = [
-        SimpleNamespace(
-            metadata={},
-            spec_generations=None,
-            spec_info=SimpleNamespace(
+        Sample(
+            spec_info=Sample.SpecInfo(
                 counts=SpeculativeCounts(None, None, None, 5),
                 legacy_counts=False,
                 completion_token_num=5,

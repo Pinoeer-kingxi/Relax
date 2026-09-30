@@ -1,7 +1,6 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -14,8 +13,8 @@ def _record(identity: str, counts: SpeculativeCounts, session: str = "session") 
     return SpeculativeGeneration(session, identity, f"state-{identity}", counts).to_dict()
 
 
-def _sample(*records: dict, session_id: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(spec_generations=list(records), session_id=session_id)
+def _sample(*records: dict, session_id: str | None = None) -> Sample:
+    return Sample(spec_generations=list(records), session_id=session_id)
 
 
 def test_weighted_aggregation_and_shared_generation_deduplication() -> None:
@@ -87,10 +86,9 @@ def test_empty_invalid_and_legacy_inputs_are_safe() -> None:
     assert empty["spec/unique_generation_count"] == 0
     assert "spec/accept_rate" not in empty
     assert compute_speculative_log_metrics([]) == {}
-    legacy = SimpleNamespace(
+    legacy = Sample(
         metadata={"agentic_trace": {"turn_count": 1}},
-        spec_generations=None,
-        spec_info=SimpleNamespace(spec_accept_token_num=9, spec_draft_token_num=10),
+        spec_info=Sample.SpecInfo(spec_accept_token_num=9, spec_draft_token_num=10),
     )
     invalid = _sample({"version": 99})
     metrics = compute_speculative_metrics([legacy, invalid])
@@ -100,13 +98,29 @@ def test_empty_invalid_and_legacy_inputs_are_safe() -> None:
 
 def test_legacy_names_remain_arithmetic_sample_averages_for_new_samples() -> None:
     samples = [
-        SimpleNamespace(spec_info=SimpleNamespace(counts=SpeculativeCounts(1, 2, 1, 2))),
-        SimpleNamespace(spec_info=SimpleNamespace(counts=SpeculativeCounts(9, 10, 2, 11))),
+        Sample(spec_info=Sample.SpecInfo(counts=SpeculativeCounts(1, 2, 1, 2))),
+        Sample(spec_info=Sample.SpecInfo(counts=SpeculativeCounts(9, 10, 2, 11))),
     ]
     metrics = compute_speculative_log_metrics(samples)
     assert metrics["spec/sample/accept_rate"] == pytest.approx(10 / 12)
     assert metrics["spec_accept_rate"] == pytest.approx((1 / 2 + 9 / 10) / 2)
     assert metrics["spec_accept_length"] == pytest.approx((2 / 1 + 11 / 2) / 2)
+
+    samples[1] = Sample.from_dict(
+        {
+            "status": "completed",
+            "spec_info": {
+                "spec_accept_token_num": 9,
+                "spec_draft_token_num": 10,
+                "spec_verify_ct": 2,
+                "completion_token_num": 11,
+            },
+        }
+    )
+    mixed = compute_speculative_log_metrics(samples)
+    assert mixed["spec_accept_rate"] == metrics["spec_accept_rate"]
+    assert mixed["spec_accept_length"] == metrics["spec_accept_length"]
+    assert mixed["spec/ordinary_sample_count"] == mixed["spec/legacy_sample_count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -154,10 +168,8 @@ def test_old_serialized_counts_do_not_fabricate_ratios(
 
 
 def test_positive_legacy_numerator_is_visible_even_with_zero_denominator() -> None:
-    sample = SimpleNamespace(
-        metadata={},
-        spec_generations=None,
-        spec_info=SimpleNamespace(
+    sample = Sample(
+        spec_info=Sample.SpecInfo(
             legacy_counts=True,
             counts=None,
             spec_accept_token_num=1,
@@ -172,10 +184,8 @@ def test_positive_legacy_numerator_is_visible_even_with_zero_denominator() -> No
 
 
 def test_completion_only_metadata_does_not_enable_speculative_logging() -> None:
-    sample = SimpleNamespace(
-        metadata={},
-        spec_generations=None,
-        spec_info=SimpleNamespace(
+    sample = Sample(
+        spec_info=Sample.SpecInfo(
             counts=SpeculativeCounts(None, None, None, 5),
             legacy_counts=False,
             spec_accept_token_num=0,
@@ -188,7 +198,7 @@ def test_completion_only_metadata_does_not_enable_speculative_logging() -> None:
 
 
 def test_enabled_speculative_logging_can_report_unknown_counters() -> None:
-    sample = SimpleNamespace(
+    sample = Sample(
         metadata={"agentic_trace": {"turn_count": 1}},
         session_id="session",
         spec_generations=[_record("request", SpeculativeCounts(None, None, None, 5))],

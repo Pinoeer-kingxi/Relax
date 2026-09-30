@@ -97,6 +97,17 @@ class Sample:
         legacy_field_counts: SpeculativeCounts | None = None
 
         @property
+        def known_counts(self) -> SpeculativeCounts:
+            """Counters for compatibility ratios, preserving unknown fields."""
+            if self.counts is not None:
+                return self.counts
+            if self.legacy_field_counts is not None:
+                return self.legacy_field_counts
+            return SpeculativeCounts(
+                self.spec_accept_token_num, self.spec_draft_token_num, self.spec_verify_ct, self.completion_token_num
+            )
+
+        @property
         def spec_accept_rate(self) -> float:
             return self.spec_accept_token_num / self.spec_draft_token_num if self.spec_draft_token_num > 0 else 0.0
 
@@ -104,19 +115,20 @@ class Sample:
         def spec_accept_length(self) -> float:
             return self.completion_token_num / self.spec_verify_ct if self.spec_verify_ct > 0 else 0.0
 
-        def add(self, meta_info: dict):
+        def add(self, meta_info: dict[str, Any]) -> None:
             counts = SpeculativeCounts.from_meta_info(meta_info)
-            if not self.legacy_counts:
+            if self.legacy_counts:
+                self.legacy_field_counts = self.known_counts.plus(counts)
+            else:
                 previous = self.counts if self.counts is not None else self.legacy_field_counts
                 self.counts = counts if previous is None else previous.plus(counts)
-            if self.legacy_field_counts is not None:
-                self.legacy_field_counts = self.legacy_field_counts.plus(counts)
+                self.legacy_field_counts = None
             self.spec_accept_token_num += counts.accepted or 0
             self.spec_draft_token_num += counts.proposed or 0
             self.spec_verify_ct += counts.verify or 0
             self.completion_token_num += counts.completion or 0
 
-        def to_dict(self):
+        def to_dict(self) -> dict[str, Any]:
             legacy_field_counts = self.legacy_field_counts if self.legacy_field_counts is not None else self.counts
             return {
                 "spec_accept_token_num": self.spec_accept_token_num,
@@ -129,7 +141,7 @@ class Sample:
             }
 
         @staticmethod
-        def from_dict(data: dict):
+        def from_dict(data: dict[str, Any]) -> "Sample.SpecInfo":
             data = data or {}
             info = Sample.SpecInfo()
             legacy = SpeculativeCounts.from_meta_info(
@@ -144,17 +156,14 @@ class Sample:
             info.spec_draft_token_num = legacy.proposed or 0
             info.spec_verify_ct = legacy.verify or 0
             info.completion_token_num = legacy.completion or 0
-            if data.get("counts") is not None:
-                info.counts = SpeculativeCounts.from_dict(data["counts"])
-            # Preserve legacy field presence independently of new counters and
-            # the legacy flag, including through subsequent serialization.
-            info.legacy_field_counts = info.counts if info.counts is not None else legacy
-            if data.get("legacy_field_counts") is not None:
-                info.legacy_field_counts = SpeculativeCounts.from_dict(data["legacy_field_counts"])
-            if "legacy_counts" in data:
-                info.legacy_counts = bool(data["legacy_counts"])
+            counts = SpeculativeCounts.from_dict(data["counts"]) if data.get("counts") is not None else None
+            info.legacy_counts = bool(data.get("legacy_counts", counts is None))
+            if counts is not None and not info.legacy_counts:
+                info.counts = counts
             else:
-                info.legacy_counts = data.get("counts") is None
+                info.legacy_field_counts = counts if counts is not None else legacy
+                if counts is None and data.get("legacy_field_counts") is not None:
+                    info.legacy_field_counts = SpeculativeCounts.from_dict(data["legacy_field_counts"])
             return info
 
     spec_info: SpecInfo = field(default_factory=SpecInfo)

@@ -47,6 +47,10 @@ def test_sample_roundtrip_and_legacy_payload_are_compatible() -> None:
     restored = Sample.from_dict(json.loads(json.dumps(sample.to_dict())))
     assert restored.spec_info.counts == SpeculativeCounts(0, 2, None, None)
     assert restored.spec_info.spec_accept_token_num == 0
+    assert restored.spec_info.legacy_field_counts is None
+    restored.spec_info.add({"spec_accepted_drafts": 1, "spec_proposed_drafts": 2})
+    assert restored.spec_info.counts == SpeculativeCounts(1, 4, None, None)
+    assert restored.spec_info.legacy_field_counts is None
 
     pending = Sample.from_dict(json.loads(json.dumps(Sample().to_dict())))
     pending.spec_info.add(
@@ -54,6 +58,7 @@ def test_sample_roundtrip_and_legacy_payload_are_compatible() -> None:
     )
     assert pending.spec_info.legacy_counts is False
     assert pending.spec_info.counts == SpeculativeCounts(1, 2, 1, 2)
+    assert pending.spec_info.legacy_field_counts is None
 
     legacy = Sample.from_dict({"status": "completed", "spec_info": {"spec_draft_token_num": 10}})
     assert legacy.spec_info.legacy_counts is True

@@ -4,7 +4,7 @@
   "status": "passed",
   "scope": "The four requested Task5 acceptance criteria; targeted rollout metrics validation, without an RL optimizer or full Megatron training run.",
   "cpu_validation": {
-    "passed": 34,
+    "passed": 35,
     "skipped": 0,
     "gpu_devices_visible": 0,
     "command": "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q tests/utils/test_speculative_counts.py tests/utils/test_speculative_metrics.py tests/test_agentic_speculative_export.py tests/distributed/ray/test_speculative_metrics_wiring.py tests/engine/rollout/test_data_source.py",
@@ -20,7 +20,9 @@
       "passed": 8
     },
     "integration_path": "AgenticSessionShard metadata accumulation -> committed SessionForest exports -> TrainingFieldArtifact -> Sample JSON roundtrip -> speculative metrics",
-    "pending_sample_serialization": "A new pending sample remains non-legacy after JSON serialization; its first generated counters still produce the new ordinary-sample weighted metrics."
+    "pending_sample_serialization": "A new pending sample remains non-legacy after JSON serialization; its first generated counters still produce the new ordinary-sample weighted metrics.",
+    "normalized_metadata": "Negative or nonnumeric backend verify/completion values remain unknown in normalized counters and contribute zero to legacy numeric subtotals, without raising during metadata accumulation.",
+    "counter_state": "New samples keep counts as their authoritative complete-counter state; the compatibility snapshot is derived on serialization. Legacy samples retain field presence in legacy_field_counts. Roundtrip and resumed-generation tests cover both paths."
   },
   "acceptance": [
     {
@@ -205,14 +207,14 @@
   "metric_compatibility": {
     "spec/accept_rate": "Ratio of summed paired accepted/proposed counters, deduplicated by (session_id, generation_id).",
     "spec/tokens_per_verify": "Ratio of summed paired completion/verify counters.",
-    "spec_accept_rate": "Arithmetic mean of complete per-sample acceptance ratios; the independent 1/2 and 9/10 example remains 0.70 under this legacy name.",
+    "spec_accept_rate": "Arithmetic mean of complete per-sample acceptance ratios, including mixed new/legacy batches; the independent 1/2 and 9/10 example remains 0.70 under this legacy name.",
     "spec_accept_length": "Arithmetic mean of complete per-sample completion/verify ratios.",
     "legacy_counts": "Retained across serialization and additional generation; legacy snapshots preserve missing counters without establishing generation identity or new metric coverage.",
     "unknown_counters": "None; omitted ratios when no complete pair or a zero paired denominator. Legacy aliases require a complete pair with a positive denominator for every sample.",
     "explicit_zero": "Known zero is preserved and can yield a valid 0% with a positive denominator.",
     "count_totals": "Retain every known value; ratios use only complete pairs.",
     "non_speculative": "No speculative metric keys when speculative decoding is disabled and only ordinary completion counts exist.",
-    "legacy_field_counts": "Optional versioned snapshot preserving which legacy counter fields are known. Existing numeric legacy fields and new-sample classification remain compatible."
+    "legacy_field_counts": "Optional versioned snapshot preserving which legacy counter fields are known. Derived from counts when serializing new samples; stored separately only for legacy or migration data. Numeric legacy subtotals and new-sample classification remain compatible."
   },
   "gpu_evidence": {
     "source_revision": "cb38e7554fbd86c59ce1e34fdf73ce074c819cc6",
