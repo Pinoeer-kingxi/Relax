@@ -530,8 +530,10 @@ Agentic 导出还会保留每个已提交生成节点的 ID 及
 `accepted`/`proposed`/`verify`/`completion` 计数。一个 rollout 指标批次先按
 `(session_id, generation_id)` 去重，再计算
 `spec/accept_rate = sum(accepted) / sum(proposed)` 和
-`spec/tokens_per_verify = sum(completion) / sum(verify)`。对应的
-`spec/*_count_coverage` 区分缺失计数与显式 0；分母缺失或为 0 时省略比率。
+`spec/tokens_per_verify = sum(completion) / sum(verify)`；每项比率只使用分子和
+分母均可用的生成记录。计数总量仍保留所有已知值，包括配对字段缺失的记录。
+对应的 `spec/*_count_coverage` 区分缺失计数与显式 0；没有完整计数对或完整计数对的
+分母总量为 0 时省略比率。
 旧的 `spec_accept_rate` 和 `spec_accept_length` 在每个样本的计数完整时继续表示
 样本算术平均。指标只覆盖本次导出样本中的已提交节点，不统计被丢弃分支。
 未启用投机解码且没有投机专有计数时，不输出 `spec/*` 指标。

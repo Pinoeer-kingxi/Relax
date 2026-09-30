@@ -12,6 +12,7 @@ def _counter_metrics(
     *,
     coverage_known: bool = True,
 ) -> dict[str, int | float]:
+    """Keep all known counter totals; compute ratios over complete pairs."""
     metrics: dict[str, int | float] = {}
     for numerator, denominator, ratio_name, cohort in (
         ("accepted", "proposed", "accept_rate", "accept"),
@@ -32,8 +33,9 @@ def _counter_metrics(
         metrics[f"{prefix}{cohort}_uncovered_count"] = max(0, total - len(pairs))
         if total and coverage_known:
             metrics[f"{prefix}{cohort}_count_coverage"] = len(pairs) / total
-        if denominator_total > 0:
-            metrics[f"{prefix}{ratio_name}"] = numerator_total / denominator_total
+        paired_denominator_total = sum(bottom for _, bottom in pairs)
+        if paired_denominator_total > 0:
+            metrics[f"{prefix}{ratio_name}"] = sum(top for top, _ in pairs) / paired_denominator_total
     return metrics
 
 

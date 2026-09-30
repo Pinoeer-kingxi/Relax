@@ -546,10 +546,12 @@ Agentic exports also retain each committed generation ID and its
 `accepted`/`proposed`/`verify`/`completion` counters. A rollout batch
 deduplicates `(session_id, generation_id)` before computing
 `spec/accept_rate = sum(accepted) / sum(proposed)` and
-`spec/tokens_per_verify = sum(completion) / sum(verify)`. The corresponding
-`spec/*_count_coverage` fields distinguish missing counters from explicit zero
-values; ratios with an unavailable or zero denominator are omitted. The
-legacy `spec_accept_rate` and `spec_accept_length` names remain arithmetic
+`spec/tokens_per_verify = sum(completion) / sum(verify)`, using only generations
+where both counters for that ratio are available. Counter totals retain all
+known values, including records with an unavailable paired counter. The
+corresponding `spec/*_count_coverage` fields distinguish missing counters from
+explicit zero values; ratios with no complete pair or a zero paired denominator
+are omitted. The legacy `spec_accept_rate` and `spec_accept_length` names remain arithmetic
 sample averages when complete per-sample counters are available. These metrics cover
 committed nodes present in exported samples and exclude discarded branches.
 When speculative decoding is disabled and no speculative-only counters are

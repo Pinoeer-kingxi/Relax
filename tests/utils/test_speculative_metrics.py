@@ -53,21 +53,31 @@ def test_missing_fields_and_zero_denominators_report_coverage_without_fake_ratio
     assert "spec/tokens_per_verify" not in metrics
 
 
-def test_available_counter_totals_survive_missing_pair_fields() -> None:
-    metrics = compute_speculative_metrics(
-        [
-            _sample(_record("accepted-only", SpeculativeCounts(1, None, None, 3))),
-            _sample(_record("verify-only", SpeculativeCounts(None, None, None, 4))),
-        ]
-    )
+def test_partial_counters_keep_totals_but_ratios_use_complete_pairs() -> None:
+    samples = [
+        _sample(_record("numerators-only", SpeculativeCounts(1, None, None, 3))),
+        _sample(_record("denominators-only", SpeculativeCounts(None, 2, 1, None))),
+    ]
+    metrics = compute_speculative_metrics(samples)
     assert metrics["spec/accepted_total"] == 1
-    assert metrics["spec/proposed_total"] == 0
-    assert metrics["spec/completion_total"] == 7
-    assert metrics["spec/verify_total"] == 0
+    assert metrics["spec/proposed_total"] == 2
+    assert metrics["spec/completion_total"] == 3
+    assert metrics["spec/verify_total"] == 1
     assert metrics["spec/accept_covered_count"] == 0
     assert metrics["spec/verify_covered_count"] == 0
     assert "spec/accept_rate" not in metrics
     assert "spec/tokens_per_verify" not in metrics
+
+    samples.append(_sample(_record("complete", SpeculativeCounts(1, 2, 1, 2))))
+    metrics = compute_speculative_metrics(samples)
+    assert metrics["spec/accepted_total"] == 2
+    assert metrics["spec/proposed_total"] == 4
+    assert metrics["spec/completion_total"] == 5
+    assert metrics["spec/verify_total"] == 2
+    assert metrics["spec/accept_count_coverage"] == pytest.approx(1 / 3)
+    assert metrics["spec/verify_count_coverage"] == pytest.approx(1 / 3)
+    assert metrics["spec/accept_rate"] == 0.5
+    assert metrics["spec/tokens_per_verify"] == 2
 
 
 def test_empty_invalid_and_legacy_inputs_are_safe() -> None:

@@ -1,8 +1,12 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
+"""CPU coverage for backend metadata, committed exports and batch metrics."""
+
 import json
+from types import SimpleNamespace
 
 from relax.agentic.pipeline import TrainingFieldArtifact
+from relax.agentic.session.service import AgenticSessionShard
 from relax.agentic.session.state import SessionForest
 from relax.utils.metrics.speculative_metrics import compute_speculative_metrics
 from relax.utils.speculative import SpeculativeCounts
@@ -28,6 +32,26 @@ def _forest(session_id: str = "session"):
 
 
 def _response(forest, parent, request_id, text, counts):
+    request = SimpleNamespace(
+        pending_weight_version_delta=[],
+        pending_spec_counts=None,
+        pending_spec_delta={
+            "spec_accept_token_num": 0,
+            "spec_draft_token_num": 0,
+            "spec_verify_ct": 0,
+            "completion_token_num": 0,
+        },
+        pending_prefix_cache_delta={"cached_tokens": 0, "total_prompt_tokens": 0},
+    )
+    AgenticSessionShard._accumulate_request_meta(
+        request,
+        meta_info={
+            "spec_num_correct_drafts": counts.accepted,
+            "spec_num_proposed_drafts": counts.proposed,
+            "spec_verify_ct": counts.verify,
+            "completion_tokens": counts.completion,
+        },
+    )
     return forest.append_resp(
         parent_state_hash=parent.state_hash,
         rollout_id=0,
@@ -35,7 +59,8 @@ def _response(forest, parent, request_id, text, counts):
         messages_delta=[{"role": "assistant", "content": text}],
         token_delta=[ord(char) for char in text],
         logprob_delta=[-0.1] * len(text),
-        spec_counts=counts,
+        spec_delta=request.pending_spec_delta,
+        spec_counts=request.pending_spec_counts,
         export_metadata_patch={"request_id": request_id},
     )
 
@@ -56,6 +81,7 @@ def test_export_tracks_committed_branch_nodes_and_excludes_discarded_branch() ->
     assert metrics["spec/record_occurrence_count"] == 4
     assert metrics["spec/accept_rate"] == 12 / 16
     assert metrics["spec/tokens_per_verify"] == 16 / 4
+    assert samples[0].spec_info.spec_accept_token_num == 10
 
     restored = TrainingFieldArtifact.from_sample(samples[0]).to_sample()
     restored = type(restored).from_dict(json.loads(json.dumps(restored.to_dict())))
@@ -81,16 +107,10 @@ def test_equal_content_requests_and_sessions_keep_distinct_identity() -> None:
     assert metrics["spec/accept_rate"] == 19 / 22
 
 
-def test_legacy_forest_without_request_identity_does_not_fabricate_generation() -> None:
-    forest, prompt = _forest()
-    node = _response(forest, prompt, "", "a", SpeculativeCounts(1, 2))
-    sample = forest.build_sample(leaf_state_hash=node.state_hash, tokenizer=_Tokenizer())
-    assert sample.spec_generations is None
-
-
 def test_untracked_content_addressed_node_does_not_become_complete_later() -> None:
     forest, prompt = _forest()
     legacy = _response(forest, prompt, "", "same", SpeculativeCounts(1, 2))
+    assert forest.build_sample(leaf_state_hash=legacy.state_hash, tokenizer=_Tokenizer()).spec_generations is None
     _response(forest, prompt, "known", "same", SpeculativeCounts(9, 10))
     sample = forest.build_sample(leaf_state_hash=legacy.state_hash, tokenizer=_Tokenizer())
     assert sample.spec_generations is None
