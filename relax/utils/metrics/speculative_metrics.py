@@ -163,13 +163,14 @@ def compute_speculative_log_metrics(samples: list[Any], *, enabled: bool = False
         ("completion", "verify", "spec_accept_length", "completion_token_num", "spec_verify_ct"),
     ):
         if source_counts[2] > 0:
-            pairs = [
-                (
-                    getattr(getattr(sample, "spec_info", None), legacy_numerator, None),
-                    getattr(getattr(sample, "spec_info", None), legacy_denominator, None),
-                )
-                for sample in samples
-            ]
+            pairs = []
+            for sample in samples:
+                info = getattr(sample, "spec_info", None)
+                counts = getattr(info, "legacy_field_counts", None) or getattr(info, "counts", None)
+                if counts is not None:
+                    pairs.append((getattr(counts, numerator), getattr(counts, denominator)))
+                else:
+                    pairs.append((getattr(info, legacy_numerator, None), getattr(info, legacy_denominator, None)))
         else:
             pairs = [
                 (getattr(counts, numerator), getattr(counts, denominator))

@@ -94,6 +94,7 @@ class Sample:
 
         counts: SpeculativeCounts | None = None
         legacy_counts: bool = False
+        legacy_field_counts: SpeculativeCounts | None = None
 
         @property
         def spec_accept_rate(self) -> float:
@@ -106,14 +107,17 @@ class Sample:
         def add(self, meta_info: dict):
             counts = SpeculativeCounts.from_meta_info(meta_info)
             if not self.legacy_counts:
-                self.counts = counts if self.counts is None else self.counts.plus(counts)
-            accepted, proposed = get_spec_token_counts(meta_info)
-            self.spec_accept_token_num += accepted
-            self.spec_draft_token_num += proposed
+                previous = self.counts if self.counts is not None else self.legacy_field_counts
+                self.counts = counts if previous is None else previous.plus(counts)
+            if self.legacy_field_counts is not None:
+                self.legacy_field_counts = self.legacy_field_counts.plus(counts)
+            self.spec_accept_token_num += counts.accepted or 0
+            self.spec_draft_token_num += counts.proposed or 0
             self.spec_verify_ct += counts.verify or 0
             self.completion_token_num += counts.completion or 0
 
         def to_dict(self):
+            legacy_field_counts = self.legacy_field_counts if self.legacy_field_counts is not None else self.counts
             return {
                 "spec_accept_token_num": self.spec_accept_token_num,
                 "spec_draft_token_num": self.spec_draft_token_num,
@@ -121,6 +125,7 @@ class Sample:
                 "completion_token_num": self.completion_token_num,
                 "counts": self.counts.to_dict() if self.counts is not None else None,
                 "legacy_counts": self.legacy_counts,
+                "legacy_field_counts": legacy_field_counts.to_dict() if legacy_field_counts is not None else None,
             }
 
         @staticmethod
@@ -141,6 +146,11 @@ class Sample:
             info.completion_token_num = legacy.completion or 0
             if data.get("counts") is not None:
                 info.counts = SpeculativeCounts.from_dict(data["counts"])
+            # Preserve legacy field presence independently of new counters and
+            # the legacy flag, including through subsequent serialization.
+            info.legacy_field_counts = info.counts if info.counts is not None else legacy
+            if data.get("legacy_field_counts") is not None:
+                info.legacy_field_counts = SpeculativeCounts.from_dict(data["legacy_field_counts"])
             if "legacy_counts" in data:
                 info.legacy_counts = bool(data["legacy_counts"])
             else:

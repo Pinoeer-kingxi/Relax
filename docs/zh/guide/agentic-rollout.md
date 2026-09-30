@@ -535,7 +535,11 @@ Agentic 导出还会保留每个已提交生成节点的 ID 及
 对应的 `spec/*_count_coverage` 区分缺失计数与显式 0；没有完整计数对或完整计数对的
 分母总量为 0 时省略比率。
 旧的 `spec_accept_rate` 和 `spec_accept_length` 在每个样本的计数完整时继续表示
-样本算术平均。指标只覆盖本次导出样本中的已提交节点，不统计被丢弃分支。
+样本算术平均。旧数据反序列化后仍保留计数的已知／未知状态，重复 JSON 序列化或
+继续生成不会把缺失字段补成已知的 0。兼容比率要求每个样本的分子已知、分母已知且
+大于 0；条件不满足时省略该比率，显式零分子仍可得到真实的 0%。旧数据保持
+`legacy_counts` 标记，不推断其生成节点身份，也不冒充新指标的计数覆盖。
+指标只覆盖本次导出样本中的已提交节点，不统计被丢弃分支。
 未启用投机解码且没有投机专有计数时，不输出 `spec/*` 指标。
 
 例如，两次独立生成的计数为 `(accepted, proposed) = (1, 2)` 和 `(9, 10)` 时，
@@ -544,6 +548,10 @@ Agentic 导出还会保留每个已提交生成节点的 ID 及
 `A=(1,2,1,2)`、`B=(9,10,2,11)`、`C=(2,4,1,3)`，则四条记录出现次数去重为三个
 生成节点，汇总为 `(accepted, proposed, verify, completion)=(12,16,4,16)`，
 所以 `spec/accept_rate=0.75`、`spec/tokens_per_verify=4`。
+
+[Task5 验收结果报告](/Relax/validation/task5-speculative-metrics.json)记录了可人工核对的
+输入、输出、CPU 测试结果、GPU 原始计数及兼容口径。GPU 结果覆盖指标端到端链路；
+旧数据修复后以 CPU 回放已保存的真实 GPU 元数据，没有重复运行 GPU 测试或完整训练。
 
 启用 `--log-passrate` 时，multi-context Session 使用显式导出，并且只有一个代表 context 携带 reward，通常是
 `main`。选中的 primary reward value 成功时设为 `1`，其他情况设为 `0`；reward object 通过 `--reward-key` 选择该

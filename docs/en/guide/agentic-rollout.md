@@ -554,6 +554,11 @@ explicit zero values; ratios with no complete pair or a zero paired denominator
 are omitted. The legacy `spec_accept_rate` and `spec_accept_length` names remain arithmetic
 sample averages when complete per-sample counters are available. These metrics cover
 committed nodes present in exported samples and exclude discarded branches.
+Legacy deserialization preserves unknown counters through repeated JSON serialization
+and resumed generation. Compatibility ratios require a known numerator and a known,
+positive denominator for every sample; otherwise that ratio is omitted. An explicit
+zero numerator can still produce a valid 0%. Legacy payloads retain `legacy_counts`;
+they do not establish generation identity or coverage for the new metrics.
 When speculative decoding is disabled and no speculative-only counters are
 present, the `spec/*` metrics are omitted.
 
@@ -564,6 +569,11 @@ trajectories `A→B` and `A→C`, with `A=(1,2,1,2)`, `B=(9,10,2,11)`, and
 `C=(2,4,1,3)`, four record occurrences reduce to three unique generations.
 The totals are `(accepted, proposed, verify, completion)=(12,16,4,16)`, giving
 `spec/accept_rate=0.75` and `spec/tokens_per_verify=4`.
+
+The [Task5 validation report](/Relax/validation/task5-speculative-metrics.json) records
+manually checkable inputs and outputs, CPU test results, raw GPU counters, and metric
+compatibility. GPU evidence covers the metrics path. Following the legacy fix, saved
+real GPU metadata was replayed on CPU; GPU inference and full training were not rerun.
 
 With `--log-passrate`, multi-context Sessions use explicit export and attach reward to exactly one representative
 context, usually `main`. Set the selected primary reward value to `1` for success or `0` otherwise; for a reward object,

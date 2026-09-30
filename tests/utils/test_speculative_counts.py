@@ -48,9 +48,34 @@ def test_sample_roundtrip_and_legacy_payload_are_compatible() -> None:
     assert restored.spec_info.counts == SpeculativeCounts(0, 2, None, None)
     assert restored.spec_info.spec_accept_token_num == 0
 
+    pending = Sample.from_dict(json.loads(json.dumps(Sample().to_dict())))
+    pending.spec_info.add(
+        {"spec_accept_token_num": 1, "spec_draft_token_num": 2, "spec_verify_ct": 1, "completion_tokens": 2}
+    )
+    assert pending.spec_info.legacy_counts is False
+    assert pending.spec_info.counts == SpeculativeCounts(1, 2, 1, 2)
+
     legacy = Sample.from_dict({"status": "completed", "spec_info": {"spec_draft_token_num": 10}})
     assert legacy.spec_info.legacy_counts is True
     assert legacy.spec_info.counts is None
+    assert legacy.spec_info.legacy_field_counts == SpeculativeCounts(None, 10, None, None)
+    legacy.spec_info.add({"spec_accept_token_num": 1, "spec_draft_token_num": 2})
+    restored = Sample.from_dict(json.loads(json.dumps(legacy.to_dict())))
+    assert restored.spec_info.legacy_counts is True
+    assert restored.spec_info.counts is None
+    assert restored.spec_info.legacy_field_counts == SpeculativeCounts(None, 12, None, None)
+
+    missing_snapshot = Sample.from_dict(
+        {"status": "completed", "spec_info": {"legacy_counts": False, "spec_draft_token_num": 10}}
+    )
+    assert missing_snapshot.spec_info.legacy_counts is False
+    assert missing_snapshot.spec_info.counts is None
+    assert missing_snapshot.spec_info.legacy_field_counts == SpeculativeCounts(None, 10, None, None)
+
+    legacy_runtime = Sample.SpecInfo(spec_accept_token_num=9, spec_draft_token_num=10, legacy_counts=True)
+    legacy_runtime.add({"spec_accept_token_num": 1, "spec_draft_token_num": 2})
+    assert legacy_runtime.counts is None
+    assert legacy_runtime.spec_accept_rate == 10 / 12
 
 
 def test_backend_counts_are_recorded_without_global_algorithm_flag() -> None:

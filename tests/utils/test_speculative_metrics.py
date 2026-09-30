@@ -1,11 +1,13 @@
 # Copyright (c) 2026 Relax Authors. All Rights Reserved.
 
+import json
 from types import SimpleNamespace
 
 import pytest
 
 from relax.utils.metrics.speculative_metrics import compute_speculative_log_metrics, compute_speculative_metrics
 from relax.utils.speculative import SpeculativeCounts, SpeculativeGeneration
+from relax.utils.types import Sample
 
 
 def _record(identity: str, counts: SpeculativeCounts, session: str = "session") -> dict:
@@ -107,24 +109,48 @@ def test_legacy_names_remain_arithmetic_sample_averages_for_new_samples() -> Non
     assert metrics["spec_accept_length"] == pytest.approx((2 / 1 + 11 / 2) / 2)
 
 
-def test_old_serialized_counts_do_not_fabricate_new_ratios() -> None:
-    sample = SimpleNamespace(
-        metadata={},
-        spec_generations=None,
-        spec_info=SimpleNamespace(
-            legacy_counts=True,
-            counts=None,
-            spec_accept_token_num=9,
-            spec_draft_token_num=10,
-            spec_verify_ct=2,
-            completion_token_num=11,
+@pytest.mark.parametrize(
+    ("patch", "deleted", "expected_aliases"),
+    [
+        ({}, None, {"spec_accept_rate": 0.9, "spec_accept_length": 5.5}),
+        ({}, "spec_accept_token_num", {"spec_accept_length": 5.5}),
+        ({}, "spec_draft_token_num", {"spec_accept_length": 5.5}),
+        ({}, "spec_verify_ct", {"spec_accept_rate": 0.9}),
+        ({}, "completion_token_num", {"spec_accept_rate": 0.9}),
+        (
+            {"spec_accept_token_num": 0, "completion_token_num": 0},
+            None,
+            {"spec_accept_rate": 0.0, "spec_accept_length": 0.0},
         ),
-    )
-    metrics = compute_speculative_log_metrics([sample])
-    assert metrics["spec/legacy_sample_count"] == 1
-    assert "spec/accept_rate" not in metrics
-    assert metrics["spec_accept_rate"] == pytest.approx(0.9)
-    assert metrics["spec_accept_length"] == pytest.approx(5.5)
+        ({"spec_draft_token_num": 0, "spec_verify_ct": 0}, None, {}),
+        ({"spec_accept_token_num": None, "completion_token_num": None}, None, {}),
+    ],
+    ids=[
+        "complete",
+        "missing-accepted",
+        "missing-proposed",
+        "missing-verify",
+        "missing-completion",
+        "explicit-zero",
+        "zero-denominators",
+        "null-numerators",
+    ],
+)
+def test_old_serialized_counts_do_not_fabricate_ratios(
+    patch: dict[str, int | None], deleted: str | None, expected_aliases: dict[str, float]
+) -> None:
+    payload = {"spec_accept_token_num": 9, "spec_draft_token_num": 10, "spec_verify_ct": 2, "completion_token_num": 11}
+    payload.update(patch)
+    if deleted is not None:
+        del payload[deleted]
+    sample = Sample.from_dict({"status": "completed", "spec_info": payload})
+    for _ in range(3):
+        metrics = compute_speculative_log_metrics([sample])
+        assert metrics["spec/legacy_sample_count"] == 1
+        assert "spec/accept_rate" not in metrics
+        assert "spec/tokens_per_verify" not in metrics
+        assert {key: value for key, value in metrics.items() if key.startswith("spec_")} == expected_aliases
+        sample = Sample.from_dict(json.loads(json.dumps(sample.to_dict())))
 
 
 def test_positive_legacy_numerator_is_visible_even_with_zero_denominator() -> None:
