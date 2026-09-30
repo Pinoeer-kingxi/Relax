@@ -555,6 +555,14 @@ committed nodes present in exported samples and exclude discarded branches.
 When speculative decoding is disabled and no speculative-only counters are
 present, the `spec/*` metrics are omitted.
 
+For example, two independent generations with `(accepted, proposed)` equal to
+`(1, 2)` and `(9, 10)` produce `spec/accepted_total=10`,
+`spec/proposed_total=12`, and `spec/accept_rate=0.833333...`. For exported
+trajectories `A→B` and `A→C`, with `A=(1,2,1,2)`, `B=(9,10,2,11)`, and
+`C=(2,4,1,3)`, four record occurrences reduce to three unique generations.
+The totals are `(accepted, proposed, verify, completion)=(12,16,4,16)`, giving
+`spec/accept_rate=0.75` and `spec/tokens_per_verify=4`.
+
 With `--log-passrate`, multi-context Sessions use explicit export and attach reward to exactly one representative
 context, usually `main`. Set the selected primary reward value to `1` for success or `0` otherwise; for a reward object,
 `--reward-key` selects that value. Leave reward unset on sibling contexts. Other contexts can carry the outcome in

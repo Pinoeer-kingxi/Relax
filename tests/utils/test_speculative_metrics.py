@@ -74,6 +74,7 @@ def test_empty_invalid_and_legacy_inputs_are_safe() -> None:
     empty = compute_speculative_metrics([])
     assert empty["spec/unique_generation_count"] == 0
     assert "spec/accept_rate" not in empty
+    assert compute_speculative_log_metrics([]) == {}
     legacy = SimpleNamespace(
         metadata={"agentic_trace": {"turn_count": 1}},
         spec_generations=None,
