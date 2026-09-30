@@ -52,7 +52,10 @@ def test_export_tracks_committed_branch_nodes_and_excludes_discarded_branch() ->
         ["a", "b"],
         ["a", "c"],
     ]
-    assert compute_speculative_metrics(samples)["spec/accept_rate"] == 12 / 16
+    metrics = compute_speculative_metrics(samples)
+    assert metrics["spec/record_occurrence_count"] == 4
+    assert metrics["spec/accept_rate"] == 12 / 16
+    assert metrics["spec/tokens_per_verify"] == 16 / 4
 
     restored = TrainingFieldArtifact.from_sample(samples[0]).to_sample()
     restored = type(restored).from_dict(json.loads(json.dumps(restored.to_dict())))

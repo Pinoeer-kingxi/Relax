@@ -534,6 +534,7 @@ Agentic 导出还会保留每个已提交生成节点的 ID 及
 `spec/*_count_coverage` 区分缺失计数与显式 0；分母缺失或为 0 时省略比率。
 旧的 `spec_accept_rate` 和 `spec_accept_length` 在每个样本的计数完整时继续表示
 样本算术平均。指标只覆盖本次导出样本中的已提交节点，不统计被丢弃分支。
+未启用投机解码且没有投机专有计数时，不输出 `spec/*` 指标。
 
 启用 `--log-passrate` 时，multi-context Session 使用显式导出，并且只有一个代表 context 携带 reward，通常是
 `main`。选中的 primary reward value 成功时设为 `1`，其他情况设为 `0`；reward object 通过 `--reward-key` 选择该

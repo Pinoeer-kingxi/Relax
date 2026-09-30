@@ -552,6 +552,8 @@ values; ratios with an unavailable or zero denominator are omitted. The
 legacy `spec_accept_rate` and `spec_accept_length` names remain arithmetic
 sample averages when complete per-sample counters are available. These metrics cover
 committed nodes present in exported samples and exclude discarded branches.
+When speculative decoding is disabled and no speculative-only counters are
+present, the `spec/*` metrics are omitted.
 
 With `--log-passrate`, multi-context Sessions use explicit export and attach reward to exactly one representative
 context, usually `main`. Set the selected primary reward value to `1` for success or `0` otherwise; for a reward object,

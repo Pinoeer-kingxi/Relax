@@ -132,3 +132,42 @@ def test_positive_legacy_numerator_is_visible_even_with_zero_denominator() -> No
     metrics = compute_speculative_log_metrics([sample])
     assert metrics["spec/legacy_sample_count"] == 1
     assert "spec/accept_rate" not in metrics
+
+
+def test_completion_only_metadata_does_not_enable_speculative_logging() -> None:
+    sample = SimpleNamespace(
+        metadata={},
+        spec_generations=None,
+        spec_info=SimpleNamespace(
+            counts=SpeculativeCounts(None, None, None, 5),
+            legacy_counts=False,
+            spec_accept_token_num=0,
+            spec_draft_token_num=0,
+            spec_verify_ct=0,
+            completion_token_num=5,
+        ),
+    )
+    assert compute_speculative_log_metrics([sample], enabled=False) == {}
+
+
+def test_enabled_speculative_logging_can_report_unknown_counters() -> None:
+    sample = SimpleNamespace(
+        metadata={"agentic_trace": {"turn_count": 1}},
+        session_id="session",
+        spec_generations=[_record("request", SpeculativeCounts(None, None, None, 5))],
+    )
+    metrics = compute_speculative_log_metrics([sample], enabled=True)
+    assert metrics["spec/unique_generation_count"] == 1
+    assert "spec/accept_rate" not in metrics
+
+
+def test_conflicting_generation_is_excluded_from_ratios_and_aliases() -> None:
+    samples = [
+        _sample(_record("same", SpeculativeCounts(1, 2, 1, 2))),
+        _sample(_record("same", SpeculativeCounts(9, 10, 1, 2))),
+    ]
+    metrics = compute_speculative_log_metrics(samples, enabled=True)
+
+    assert metrics["spec/conflicting_generation_count"] == 1
+    assert "spec/accept_rate" not in metrics
+    assert "spec_accept_rate" not in metrics

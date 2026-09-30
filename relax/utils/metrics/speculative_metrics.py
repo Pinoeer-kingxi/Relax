@@ -128,27 +128,20 @@ def compute_speculative_metrics(samples: Iterable[Any]) -> dict[str, int | float
 def compute_speculative_log_metrics(samples: list[Any], *, enabled: bool = False) -> dict[str, int | float]:
     """Return new batch metrics plus complete legacy aliases when provable."""
     sample_counts = [_sample_counts(sample) for sample in samples]
-    has_data = any(
-        getattr(sample, "spec_generations", None) is not None
-        or "agentic_trace" in (getattr(sample, "metadata", None) or {})
-        for sample in samples
-    )
-    has_data |= any(
-        counts is not None
-        and any(value is not None for value in (counts.accepted, counts.proposed, counts.verify, counts.completion))
+    has_speculative_fields = any(
+        counts is not None and any(value is not None for value in (counts.accepted, counts.proposed, counts.verify))
         for counts in sample_counts
     )
     legacy_counter_names = (
         "spec_accept_token_num",
         "spec_draft_token_num",
         "spec_verify_ct",
-        "completion_token_num",
     )
-    has_data |= any(
+    has_speculative_fields |= any(
         any((getattr(getattr(sample, "spec_info", None), key, 0) or 0) > 0 for key in legacy_counter_names)
         for sample in samples
     )
-    if not enabled and not has_data:
+    if not enabled and not has_speculative_fields:
         return {}
 
     metrics = compute_speculative_metrics(samples)
